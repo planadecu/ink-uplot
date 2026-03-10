@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --external canvas --external uplot --external react --external ink",
+    "build": "tsup src/index.ts --format esm --dts --external canvas --external uplot --external react --external ink --external path2d",
     "test": "vitest run",
     "test:watch": "vitest"
   },
