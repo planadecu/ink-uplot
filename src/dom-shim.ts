@@ -1,4 +1,5 @@
 import { createCanvas, type Canvas } from 'canvas';
+import { Path2D } from 'path2d';
 
 let installed = false;
 const savedGlobals: Record<string, any> = {};
@@ -54,9 +55,89 @@ function createStubElement(tag: string): any {
   return el;
 }
 
+/**
+ * Patch a canvas 2D context so that stroke(path), fill(path), and clip(path)
+ * work with path2d's Path2D polyfill by replaying the recorded path commands
+ * before calling the native method.
+ */
+function patchCtxForPath2D(ctx: any): void {
+  const origStroke = ctx.stroke.bind(ctx);
+  const origFill = ctx.fill.bind(ctx);
+  const origClip = ctx.clip.bind(ctx);
+  const origIsPointInPath = ctx.isPointInPath?.bind(ctx);
+
+  ctx.stroke = function (pathOrRule?: any) {
+    if (pathOrRule instanceof Path2D) {
+      ctx.beginPath();
+      (pathOrRule as any).buildPathInCanvas(ctx);
+      return origStroke();
+    }
+    return origStroke(pathOrRule);
+  };
+
+  ctx.fill = function (pathOrRule?: any, fillRule?: any) {
+    if (pathOrRule instanceof Path2D) {
+      ctx.beginPath();
+      (pathOrRule as any).buildPathInCanvas(ctx);
+      return fillRule != null ? origFill(fillRule) : origFill();
+    }
+    return pathOrRule != null ? origFill(pathOrRule) : origFill();
+  };
+
+  ctx.clip = function (pathOrRule?: any, fillRule?: any) {
+    if (pathOrRule instanceof Path2D) {
+      ctx.beginPath();
+      (pathOrRule as any).buildPathInCanvas(ctx);
+      return fillRule != null ? origClip(fillRule) : origClip();
+    }
+    return pathOrRule != null ? origClip(pathOrRule) : origClip();
+  };
+
+  if (origIsPointInPath) {
+    ctx.isPointInPath = function (pathOrX?: any, xOrY?: any, yOrRule?: any, rule?: any) {
+      if (pathOrX instanceof Path2D) {
+        ctx.beginPath();
+        (pathOrX as any).buildPathInCanvas(ctx);
+        return rule != null
+          ? origIsPointInPath(xOrY, yOrRule, rule)
+          : origIsPointInPath(xOrY, yOrRule);
+      }
+      return origIsPointInPath(pathOrX, xOrY, yOrRule);
+    };
+  }
+}
+
 export interface DOMShimResult {
   canvas: Canvas;
 }
+
+// Module-level mutable state for the current canvas factory.
+// uPlot captures `doc = document` at module load time, so we must keep the
+// same document object across multiple installDOMShim calls. We achieve this
+// by having createElement delegate to a mutable `_currentCreateCanvas` function.
+let _currentCreateCanvas: (() => any) | null = null;
+
+// The single persistent document stub, shared across all installs.
+// uPlot's `doc` will always reference this same object.
+const stubDocument: any = {
+  createElement(tag: string) {
+    if (tag === 'canvas' && _currentCreateCanvas) {
+      return _currentCreateCanvas();
+    }
+    const el = createStubElement(tag);
+    el.ownerDocument = stubDocument;
+    return el;
+  },
+  createElementNS(_ns: string, tag: string) {
+    return stubDocument.createElement(tag);
+  },
+  createTextNode(_text: string) {
+    return createStubElement('#text');
+  },
+  body: createStubElement('body'),
+  documentElement: createStubElement('html'),
+  head: createStubElement('head'),
+};
 
 export function installDOMShim(canvasWidth: number, canvasHeight: number): DOMShimResult {
   if (installed) uninstallDOMShim();
@@ -81,37 +162,34 @@ export function installDOMShim(canvasWidth: number, canvasHeight: number): DOMSh
       x: 0, y: 0, top: 0, left: 0, bottom: 0, right: 0,
       width: canvasWidth, height: canvasHeight, toJSON() {},
     });
-    wrapped.ownerDocument = null;
+    wrapped.ownerDocument = stubDocument;
     wrapped.parentNode = null;
+
+    // Patch the 2D context for Path2D support
+    const origGetContext = wrapped.getContext.bind(wrapped);
+    let patchedCtx: any = null;
+    wrapped.getContext = (type: string) => {
+      const ctx = origGetContext(type);
+      if (type === '2d' && ctx && !patchedCtx) {
+        patchCtxForPath2D(ctx);
+        patchedCtx = ctx;
+      }
+      return ctx;
+    };
+
     return wrapped;
   }
 
   const wrappedCanvas = wrapCanvas(realCanvas);
 
-  const stubDocument: any = {
-    createElement(tag: string) {
-      if (tag === 'canvas') {
-        if (!canvasUsed) {
-          canvasUsed = true;
-          wrappedCanvas.ownerDocument = stubDocument;
-          return wrappedCanvas;
-        }
-        const extra = createCanvas(1, 1);
-        return wrapCanvas(extra);
-      }
-      const el = createStubElement(tag);
-      el.ownerDocument = stubDocument;
-      return el;
-    },
-    createElementNS(_ns: string, tag: string) {
-      return stubDocument.createElement(tag);
-    },
-    createTextNode(_text: string) {
-      return createStubElement('#text');
-    },
-    body: createStubElement('body'),
-    documentElement: createStubElement('html'),
-    head: createStubElement('head'),
+  // Update the canvas factory for the persistent document.
+  _currentCreateCanvas = () => {
+    if (!canvasUsed) {
+      canvasUsed = true;
+      return wrappedCanvas;
+    }
+    const extra = createCanvas(1, 1);
+    return wrapCanvas(extra);
   };
 
   const stubMatchMedia = (_query: string) => ({
@@ -153,9 +231,13 @@ export function installDOMShim(canvasWidth: number, canvasHeight: number): DOMSh
     clearTimeout,
   };
 
+  // Stub HTMLElement class so uPlot's `instanceof HTMLElement` checks work
+  class StubHTMLElement {}
+
   const keys = ['window', 'document', 'navigator', 'devicePixelRatio',
     'requestAnimationFrame', 'cancelAnimationFrame', 'matchMedia',
-    'getComputedStyle', 'ResizeObserver', 'CustomEvent', 'queueMicrotask'] as const;
+    'getComputedStyle', 'ResizeObserver', 'CustomEvent', 'HTMLElement',
+    'Path2D'] as const;
 
   for (const key of keys) {
     savedGlobals[key] = (globalThis as any)[key];
@@ -172,7 +254,8 @@ export function installDOMShim(canvasWidth: number, canvasHeight: number): DOMSh
     getComputedStyle: stubWindow.getComputedStyle,
     ResizeObserver: stubWindow.ResizeObserver,
     CustomEvent: stubWindow.CustomEvent,
-    queueMicrotask: (fn: () => void) => fn(),
+    HTMLElement: StubHTMLElement,
+    Path2D,
   };
 
   for (const [key, value] of Object.entries(globals)) {
@@ -194,9 +277,12 @@ export function installDOMShim(canvasWidth: number, canvasHeight: number): DOMSh
 export function uninstallDOMShim(): void {
   if (!installed) return;
 
+  _currentCreateCanvas = null;
+
   const keys = ['window', 'document', 'navigator', 'devicePixelRatio',
     'requestAnimationFrame', 'cancelAnimationFrame', 'matchMedia',
-    'getComputedStyle', 'ResizeObserver', 'CustomEvent', 'queueMicrotask'] as const;
+    'getComputedStyle', 'ResizeObserver', 'CustomEvent', 'HTMLElement',
+    'Path2D'] as const;
 
   for (const key of keys) {
     if (savedGlobals[key] === undefined) {
