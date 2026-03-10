@@ -13,7 +13,7 @@ function sanitizeOpts(
     width,
     height,
     cursor: { show: false },
-    select: { show: false },
+    select: { show: false, left: 0, top: 0, width: 0, height: 0 },
     legend: { show: false },
     focus: { alpha: 1 },
   };
