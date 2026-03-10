@@ -24,8 +24,8 @@ export interface BrailleResult {
 }
 
 export interface InkUPlotProps {
-  /** Standard uPlot options object. Interactive options are automatically stripped. */
-  opts: uPlot.Options;
+  /** Standard uPlot options object. width/height are optional (overridden by component props). Interactive options are automatically stripped. */
+  opts: Omit<uPlot.Options, 'width' | 'height'> & { width?: number; height?: number };
   /** uPlot data array — same format as browser uPlot. */
   data: uPlot.AlignedData;
   /** Chart width in terminal columns. Defaults to stdout.columns or 80. */
