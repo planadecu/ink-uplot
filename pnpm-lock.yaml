@@ -11,18 +11,9 @@ importers:
       canvas:
         specifier: ^3.2.1
         version: 3.2.1
-      ink:
-        specifier: ^6.8.0
-        version: 6.8.0(@types/react@19.2.14)(react@19.2.4)
       path2d:
         specifier: ^0.3.1
         version: 0.3.1
-      react:
-        specifier: ^19.2.4
-        version: 19.2.4
-      uplot:
-        specifier: ^1.6.32
-        version: 1.6.32
     devDependencies:
       '@types/node':
         specifier: ^25.4.0
@@ -30,12 +21,21 @@ importers:
       '@types/react':
         specifier: ^19.2.14
         version: 19.2.14
+      ink:
+        specifier: ^6.8.0
+        version: 6.8.0(@types/react@19.2.14)(react@19.2.4)
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(postcss@8.5.8)(typescript@5.9.3)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      uplot:
+        specifier: ^1.6.32
+        version: 1.6.32
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@25.4.0)

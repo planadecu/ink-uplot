@@ -1,24 +1,63 @@
 {
   "name": "ink-uplot",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Render uPlot charts in the terminal using Unicode Braille characters via React Ink",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "default": "./dist/index.js"
     }
   },
+  "sideEffects": false,
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --external canvas --external uplot --external react --external ink --external path2d",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "ink",
+    "uplot",
+    "cli",
+    "chart",
+    "braille",
+    "terminal",
+    "visualization",
+    "react",
+    "typescript",
+    "time-series",
+    "unicode"
+  ],
+  "author": {
+    "name": "Jordi Planadecursach",
+    "url": "https://github.com/planadecu"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/planadecu/ink-uplot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/planadecu/ink-uplot/issues"
+  },
+  "homepage": "https://github.com/planadecu/ink-uplot#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public",
+    "tag": "latest",
+    "provenance": true
+  },
   "packageManager": "pnpm@10.28.0",
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -28,16 +67,16 @@
   },
   "dependencies": {
     "canvas": "^3.2.1",
-    "ink": "^6.8.0",
-    "path2d": "^0.3.1",
-    "react": "^19.2.4",
-    "uplot": "^1.6.32"
+    "path2d": "^0.3.1"
   },
   "devDependencies": {
     "@types/node": "^25.4.0",
     "@types/react": "^19.2.14",
+    "ink": "^6.8.0",
+    "react": "^19.2.4",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
+    "uplot": "^1.6.32",
     "vitest": "^4.0.18"
   },
   "peerDependencies": {
