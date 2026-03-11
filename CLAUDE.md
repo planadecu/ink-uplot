@@ -16,7 +16,7 @@ ink-uplot renders uPlot charts in the terminal via React Ink. It reuses standard
 ## Commands
 
 ```bash
-pnpm test          # Run all tests (30 tests, ~260ms)
+pnpm test          # Run all tests (53 tests, ~1.3s)
 pnpm run build     # Build to dist/ (ESM + DTS)
 npx tsc --noEmit   # Type-check without emitting
 npx tsx examples/basic-line.tsx  # Run example
@@ -85,6 +85,9 @@ Tests are in `test/`. Each source module has a corresponding test file:
 - `test/dom-shim.test.ts` — 7 tests for DOM shim globals and stub elements
 - `test/renderer.test.ts` — 3 tests for uPlot rendering (no crash, pixels present, dimensions)
 - `test/color-sampler.test.ts` — 9 tests for RGB → ANSI color mapping
+- `test/axes.test.ts` — 13 tests for tick calculation, positioning, timestamp detection/formatting
+- `test/chafa.test.ts` — 3 tests for chafa-wasm pixel-to-terminal conversion
+- `test/component.test.tsx` — 7 tests for InkUPlot React component (uses ink-testing-library)
 - `test/integration.test.ts` — 1 full pipeline test (opts → braille string)
 
 ## Conventions
