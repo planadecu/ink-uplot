@@ -75,6 +75,7 @@ Examples are in `examples/`. Run with `npx tsx examples/<name>.tsx`.
 | `timestamps.tsx` | Unix timestamp X-axis with auto date formatting |
 | `live-trading.tsx` | Streaming data at 100ms, mm:ss X-axis, last-value highlight |
 | `no-axes.tsx` | Borderless chart with `showAxes={false}` |
+| `line-width-test.tsx` | Interactive line width comparison (←/→ keys) |
 
 ## Testing
 

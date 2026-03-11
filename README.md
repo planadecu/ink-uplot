@@ -87,6 +87,7 @@ Run any example with `npx tsx examples/<name>.tsx`. Press `q` to quit.
 | [`timestamps.tsx`](examples/timestamps.tsx) | 90-day time series with date X-axis |
 | [`live-trading.tsx`](examples/live-trading.tsx) | Streaming data at 100ms, mm:ss X-axis, highlighted last value |
 | [`no-axes.tsx`](examples/no-axes.tsx) | Minimal borderless chart (`showAxes={false}`) |
+| [`line-width-test.tsx`](examples/line-width-test.tsx) | Interactive line width comparison (arrow keys to adjust) |
 
 ![Shaded area chart](assets/shaded-area.png)
 
