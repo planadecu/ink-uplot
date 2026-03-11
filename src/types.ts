@@ -34,6 +34,8 @@ export interface InkUPlotProps {
   height?: number;
   /** Luminance threshold for 1-bit conversion (0–255). Default: 128. */
   threshold?: number;
+  /** Show text axes around the chart. Default: true. */
+  showAxes?: boolean;
   /** Enable ANSI color output. Default: true. */
   color?: boolean;
   /** Background color assumption. 'dark' = light-on-dark (default). */

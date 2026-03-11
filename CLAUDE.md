@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-ink-uplot renders uPlot charts as Unicode Braille characters in the terminal via React Ink. It reuses standard browser uPlot configuration objects.
+ink-uplot renders uPlot charts in the terminal via React Ink. It reuses standard browser uPlot configuration objects and produces truecolor Unicode block art using chafa-wasm, with text-based axes rendered as Ink `<Text>` components.
 
 ## Tech Stack
 
@@ -10,7 +10,7 @@ ink-uplot renders uPlot charts as Unicode Braille characters in the terminal via
 - **Package manager:** pnpm
 - **Build:** tsup (ESM output with .d.ts)
 - **Test:** Vitest (`pnpm test`)
-- **Runtime deps:** uplot, canvas (node-canvas), path2d, ink, react
+- **Runtime deps:** uplot, canvas (node-canvas), path2d, chafa-wasm, ink, react
 - **Peer deps:** uplot >=1.6.0, ink >=4.0.0, react >=18.0.0
 
 ## Commands
@@ -25,7 +25,9 @@ npx tsx examples/basic-line.tsx  # Run example
 ## Architecture
 
 ```
-opts + data → [DOM shim] → [uPlot on node-canvas] → [getImageData] → [Braille encoding] → [Ink <Text>]
+opts + data → [DOM shim] → [uPlot on node-canvas] → [getImageData] → [chafa-wasm] → [Ink <Text>]
+                                                                         ↓
+                                                              text axes (axes.ts) → [Ink <Text>]
 ```
 
 ### Source Files
@@ -33,11 +35,13 @@ opts + data → [DOM shim] → [uPlot on node-canvas] → [getImageData] → [Br
 | File | Responsibility |
 |------|---------------|
 | `src/dom-shim.ts` | Fake DOM globals (document, window, navigator) for uPlot. Persistent singleton document — uPlot caches `doc` at import time. |
-| `src/renderer.ts` | Orchestrates shim + dynamic uPlot import + canvas extraction. Returns ImageData. |
-| `src/braille.ts` | Pure function: pixel buffer → Unicode Braille string. 2x4 dot grid per character cell. |
-| `src/color-sampler.ts` | Per-cell dominant color extraction → ANSI color name. |
-| `src/InkUPlot.tsx` | React Ink component wiring everything together. |
-| `src/types.ts` | Shared TypeScript interfaces. |
+| `src/renderer.ts` | Orchestrates shim + dynamic uPlot import + canvas extraction. Returns ImageData. Handles braille vs pixel rendering modes. |
+| `src/chafa.ts` | Wrapper around chafa-wasm. Converts pixel buffer to truecolor Unicode block art (symbols, sixels, kitty, iterm2). |
+| `src/axes.ts` | Nice-numbers tick calculation (Heckbert 1990), tick positioning, timestamp auto-detection and formatting. |
+| `src/braille.ts` | Pure function: pixel buffer → Unicode Braille string. 2x4 dot grid per character cell. Legacy/alternative renderer. |
+| `src/color-sampler.ts` | Per-cell dominant color extraction → ANSI color name. Used with braille renderer. |
+| `src/InkUPlot.tsx` | React Ink component. Renders chart via chafa-wasm, composes text axes (left/right Y, bottom X), supports dual Y-axis and custom formatters. |
+| `src/types.ts` | Shared TypeScript interfaces (InkUPlotProps, BrailleOptions, etc.). |
 | `src/index.ts` | Public API exports. |
 
 ### Critical Design Decisions
@@ -51,6 +55,26 @@ opts + data → [DOM shim] → [uPlot on node-canvas] → [getImageData] → [Br
 4. **Async microtask flushing** — Synchronous `queueMicrotask` override breaks uPlot's internal ordering (causes NaN canvas dimensions). The renderer leaves `queueMicrotask` as native async and uses `await Promise.resolve()` x2 to flush.
 
 5. **opts sanitization** — `cursor`, `select`, `legend` are disabled; `focus.alpha` set to 1. These are DOM-only features that would crash in the shim.
+
+6. **chafa-wasm for rendering** — Replaced braille encoding with chafa-wasm for truecolor Unicode block art. Config values use `.value` on Emscripten enum objects (not strings). Canvas axes are hidden; text axes are rendered separately by the component.
+
+7. **Text axes from data** — uPlot's canvas-rendered axes are hidden (`show: false`). The component calculates tick positions using the nice-numbers algorithm, renders Y-axis labels as `<Text>` (left/right based on `side` in opts.axes), and X-axis ticks at the bottom. Supports custom `values` formatter on axes (uPlot-compatible signature).
+
+8. **Canvas dimension cap** — `MAX_CANVAS_PX = 4096` prevents chafa-wasm WASM heap OOB access on very large terminals.
+
+## Examples
+
+Examples are in `examples/`. Run with `npx tsx examples/<name>.tsx`.
+
+| Example | What it demonstrates |
+|---------|---------------------|
+| `basic-line.tsx` | Simple sine wave with axes |
+| `multi-series.tsx` | Three overlapping colored series |
+| `dual-y-axis.tsx` | Left + right Y-axis via `scale` and `side` config |
+| `shaded-area.tsx` | Area charts with translucent `fill` |
+| `timestamps.tsx` | Unix timestamp X-axis with auto date formatting |
+| `live-trading.tsx` | Streaming data at 100ms, mm:ss X-axis, last-value highlight |
+| `no-axes.tsx` | Borderless chart with `showAxes={false}` |
 
 ## Testing
 
@@ -74,4 +98,4 @@ Tests are in `test/`. Each source module has a corresponding test file:
 - `renderToImageData` must not be called concurrently (global DOM state)
 - uPlot must not be statically imported elsewhere before the renderer's first call
 - node-canvas requires system Cairo/Pango libraries
-- Color mapping is limited to 8 ANSI colors (red, green, blue, cyan, magenta, yellow, white, gray)
+- Shaded area fills need alpha >= 0.3 to be visible through chafa

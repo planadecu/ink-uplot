@@ -16,19 +16,30 @@ export function InkUPlot({
   width,
   height = 24,
   threshold = 128,
+  showAxes = true,
   color = true,
   background = 'dark',
 }: InkUPlotProps) {
   const termCols = width ?? process.stdout.columns ?? 80;
 
   const scales = useMemo(() => {
+    if (!showAxes) return null;
     const xValues = data[0] as number[];
     let xMin = Infinity, xMax = -Infinity;
     for (const v of xValues) { if (v < xMin) xMin = v; if (v > xMax) xMax = v; }
 
-    // X-axis: auto-detect timestamps
-    const isTimestamp = looksLikeTimestamps(xValues);
-    const xTicks = calculateTicks(xMin, xMax, 6, isTimestamp ? formatTimestamp : undefined);
+    // X-axis: use custom formatter from opts.axes[0].values, or auto-detect timestamps
+    const xAxisDef = (opts.axes as any)?.[0];
+    let xFormatter: ((v: number) => string) | undefined;
+    if (typeof xAxisDef?.values === 'function') {
+      xFormatter = (v: number) => {
+        const result = xAxisDef.values(null, [v], 0, 0);
+        return Array.isArray(result) ? String(result[0]) : String(result);
+      };
+    } else if (looksLikeTimestamps(xValues)) {
+      xFormatter = formatTimestamp;
+    }
+    const xTicks = calculateTicks(xMin, xMax, 6, xFormatter);
 
     // Group series by scale name from opts.series
     const scaleGroups = new Map<string, number[]>();
@@ -39,10 +50,20 @@ export function InkUPlot({
       scaleGroups.get(scaleName)!.push(i);
     }
 
+    // Build a map from scale name → side using opts.axes
+    const axisDefs = (opts.axes ?? []) as any[];
+    const scaleSideMap = new Map<string, 'left' | 'right'>();
+    for (const ax of axisDefs) {
+      if (ax?.scale) {
+        // uPlot: side 0 = left (default), side 1 = right
+        scaleSideMap.set(ax.scale, ax.side === 1 ? 'right' : 'left');
+      }
+    }
+
     // Build scale info for each group
     const yScales: ScaleInfo[] = [];
     let scaleIdx = 0;
-    for (const [, indices] of scaleGroups) {
+    for (const [scaleName, indices] of scaleGroups) {
       let min = Infinity, max = -Infinity;
       for (const idx of indices) {
         const series = data[idx];
@@ -55,15 +76,16 @@ export function InkUPlot({
       }
       if (min === Infinity) { min = 0; max = 1; }
       const ticks = calculateTicks(min, max);
-      yScales.push({ ticks, side: scaleIdx === 0 ? 'left' : 'right' });
+      const side = scaleSideMap.get(scaleName) ?? (scaleIdx === 0 ? 'left' : 'right');
+      yScales.push({ ticks, side });
       scaleIdx++;
     }
 
     return { xTicks, yScales };
-  }, [data, opts.series]);
+  }, [data, opts.series, showAxes]);
 
-  const leftScale = scales.yScales.find(s => s.side === 'left');
-  const rightScale = scales.yScales.find(s => s.side === 'right');
+  const leftScale = scales?.yScales.find(s => s.side === 'left') ?? null;
+  const rightScale = scales?.yScales.find(s => s.side === 'right') ?? null;
 
   const leftLabelWidth = leftScale
     ? Math.max(...leftScale.ticks.labels.map(l => l.length)) + 1
@@ -72,16 +94,23 @@ export function InkUPlot({
     ? Math.max(...rightScale.ticks.labels.map(l => l.length)) + 1
     : 0;
 
-  const chartCols = termCols - leftLabelWidth - rightLabelWidth;
-  const chartRows = height - 2;
+  const chartCols = Math.max(1, termCols - leftLabelWidth - rightLabelWidth);
+  const chartRows = Math.max(1, showAxes ? height - 2 : height);
 
-  const canvasWidth = chartCols * 8;
-  const canvasHeight = chartRows * 16;
+  // Cap canvas pixel dimensions to avoid WASM memory issues.
+  // chafa-wasm operates on a fixed WASM heap; very large buffers cause OOB access.
+  const MAX_CANVAS_PX = 4096;
+  const canvasWidth = Math.min(chartCols * 8, MAX_CANVAS_PX);
+  const canvasHeight = Math.min(chartRows * 16, MAX_CANVAS_PX);
 
   const [output, setOutput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Clear stale output immediately when dimensions change
+  useEffect(() => { setOutput(null); setError(null); }, [canvasWidth, canvasHeight]);
+
   useEffect(() => {
+    if (canvasWidth < 8 || canvasHeight < 16) return;
     let cancelled = false;
 
     (async () => {
@@ -117,6 +146,16 @@ export function InkUPlot({
   }
 
   const chartLines = output.split('\n');
+
+  if (!showAxes || !scales) {
+    return (
+      <Box flexDirection="column">
+        {chartLines.map((line, i) => (
+          <Text key={i}>{line}</Text>
+        ))}
+      </Box>
+    );
+  }
 
   const leftLabels = leftScale
     ? buildYLabels(leftScale.ticks, chartRows, leftLabelWidth, 'left')
