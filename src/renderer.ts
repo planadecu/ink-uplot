@@ -39,7 +39,15 @@ function sanitizeOpts(
       return { ...s, width: Math.max((s as any).width ?? 1, 3) };
     });
   } else {
-    // Sixel: scale line widths up for the higher pixel resolution.
+    // Chafa/Sixel mode: hide axes (rendered as text by the component instead).
+    base.axes = (opts.axes ?? []).map(a => ({
+      ...a,
+      show: false,
+      grid: { ...a?.grid, show: false },
+      ticks: { ...a?.ticks, show: false },
+    }));
+
+    // Scale line widths up for the higher pixel resolution.
     // At 8px per terminal column, a 2px line is barely visible.
     base.series = (opts.series ?? []).map((s, i) => {
       if (i === 0) return s;
