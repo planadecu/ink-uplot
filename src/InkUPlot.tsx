@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { renderToImageData } from './renderer.js';
-import { pixelsToBraille } from './braille.js';
-import { sampleCellColors } from './color-sampler.js';
-import type { InkUPlotProps, ColoredChar } from './types.js';
+import { pixelsToTerminal } from './chafa.js';
+import type { InkUPlotProps } from './types.js';
 
 export function InkUPlot({
   opts,
@@ -15,12 +14,11 @@ export function InkUPlot({
   background = 'dark',
 }: InkUPlotProps) {
   const termCols = width ?? process.stdout.columns ?? 80;
-  const canvasWidth = termCols * 2;
-  const canvasHeight = height * 4;
-  const invert = background === 'light';
+  // Render at higher resolution for chafa to downsample with better quality
+  const canvasWidth = termCols * 8;
+  const canvasHeight = height * 16;
 
-  const [lines, setLines] = useState<ColoredChar[][] | null>(null);
-  const [plainText, setPlainText] = useState<string | null>(null);
+  const [output, setOutput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -28,32 +26,17 @@ export function InkUPlot({
 
     (async () => {
       try {
-        const imageData = await renderToImageData(opts, data, canvasWidth, canvasHeight);
-
+        const imageData = await renderToImageData(opts, data, canvasWidth, canvasHeight, { brailleMode: false });
         if (cancelled) return;
 
-        const braille = pixelsToBraille(imageData, { threshold, invert });
+        const ansi = await pixelsToTerminal(imageData, {
+          width: termCols,
+          height,
+          colors: color ? 'truecolor' : 'none',
+        });
+        if (cancelled) return;
 
-        if (color) {
-          const colors = sampleCellColors(imageData, threshold);
-          const brailleLines = braille.split('\n');
-          const colored: ColoredChar[][] = brailleLines.map((line, rowIdx) => {
-            const chars: ColoredChar[] = [];
-            for (let i = 0; i < line.length; i++) {
-              chars.push({
-                char: line[i],
-                color: colors[rowIdx]?.[i] ?? null,
-              });
-            }
-            return chars;
-          });
-          setLines(colored);
-          setPlainText(null);
-        } else {
-          setPlainText(braille);
-          setLines(null);
-        }
-
+        setOutput(ansi);
         setError(null);
       } catch (err) {
         if (!cancelled) {
@@ -63,54 +46,22 @@ export function InkUPlot({
     })();
 
     return () => { cancelled = true; };
-  }, [opts, data, canvasWidth, canvasHeight, threshold, invert, color]);
+  }, [opts, data, canvasWidth, canvasHeight, termCols, height, color]);
 
   if (error) {
     return <Text color="red">Error rendering chart: {error}</Text>;
   }
 
-  if (!lines && !plainText) {
+  if (!output) {
     return <Text dimColor>Rendering chart...</Text>;
   }
 
-  if (plainText) {
-    return (
-      <Box flexDirection="column">
-        {plainText.split('\n').map((line, i) => (
-          <Text key={i}>{line}</Text>
-        ))}
-      </Box>
-    );
-  }
-
+  // chafa output contains ANSI escape sequences that Ink's Text can pass through
   return (
     <Box flexDirection="column">
-      {lines!.map((segments, i) => (
-        <Text key={i}>
-          {renderColoredLine(segments)}
-        </Text>
+      {output.split('\n').map((line, i) => (
+        <Text key={i}>{line}</Text>
       ))}
     </Box>
-  );
-}
-
-function renderColoredLine(segments: ColoredChar[]): React.ReactNode[] {
-  const groups: { chars: string; color: string | null }[] = [];
-
-  for (const seg of segments) {
-    const last = groups[groups.length - 1];
-    if (last && last.color === seg.color) {
-      last.chars += seg.char;
-    } else {
-      groups.push({ chars: seg.char, color: seg.color });
-    }
-  }
-
-  return groups.map((g, j) =>
-    g.color ? (
-      <Text key={j} color={g.color}>{g.chars}</Text>
-    ) : (
-      <Text key={j}>{g.chars}</Text>
-    )
   );
 }

@@ -33,7 +33,7 @@ function App({ exit }: { exit: () => void }) {
     if (input === 'q' || (key.ctrl && input === 'c')) exit();
   });
 
-  return <InkUPlot opts={opts} data={data} width={size.cols} height={size.rows} threshold={30} />;
+  return <InkUPlot opts={opts} data={data} width={size.cols} height={size.rows} />;
 }
 
 const app = render(<App exit={() => app.unmount()} />);
