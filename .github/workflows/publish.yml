@@ -19,7 +19,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          standalone: true
       - uses: actions/setup-node@v4
         with:
           node-version: 24
