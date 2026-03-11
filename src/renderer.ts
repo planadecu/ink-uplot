@@ -4,14 +4,31 @@ import type uPlotType from 'uplot';
 let uPlotCtor: typeof uPlotType | null = null;
 
 function sanitizeOpts(
-  opts: uPlotType.Options,
+  opts: Omit<uPlotType.Options, 'width' | 'height'> & { width?: number; height?: number },
   width: number,
   height: number,
 ): uPlotType.Options {
+  // Hide axes and grid — they render as noisy braille dots.
+  // The data series are the only thing that looks good in braille.
+  const axes = (opts.axes ?? []).map(a => ({
+    ...a,
+    show: false,
+    grid: { ...a?.grid, show: false },
+    ticks: { ...a?.ticks, show: false },
+  }));
+
+  // Ensure series lines are thick enough to render well in braille (2x4 dot grid).
+  const series = (opts.series ?? []).map((s, i) => {
+    if (i === 0) return s; // x-axis series, no stroke
+    return { ...s, width: Math.max((s as any).width ?? 1, 3) };
+  });
+
   return {
     ...opts,
     width,
     height,
+    axes,
+    series,
     cursor: { show: false },
     select: { show: false, left: 0, top: 0, width: 0, height: 0 },
     legend: { show: false },
@@ -31,7 +48,7 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 export async function renderToImageData(
-  opts: uPlotType.Options,
+  opts: Omit<uPlotType.Options, 'width' | 'height'> & { width?: number; height?: number },
   data: uPlotType.AlignedData,
   canvasWidth: number,
   canvasHeight: number,
