@@ -82,7 +82,7 @@ export function InkUPlot({
     }
 
     return { xTicks, yScales };
-  }, [data, opts.series, showAxes]);
+  }, [data, opts.series, opts.axes, showAxes]);
 
   const leftScale = scales?.yScales.find(s => s.side === 'left') ?? null;
   const rightScale = scales?.yScales.find(s => s.side === 'right') ?? null;
