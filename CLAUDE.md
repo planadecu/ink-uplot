@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-ink-uplot renders uPlot charts in the terminal via React Ink. It reuses standard browser uPlot configuration objects and produces truecolor Unicode block art using chafa-wasm, with text-based axes rendered as Ink `<Text>` components.
+ink-uplot renders uPlot charts in the terminal via React Ink. It reuses standard browser uPlot configuration objects and produces truecolor Unicode block art using chafa-wasm, with text-based axes rendered as Ink `<Text>` components. Supports multiple output formats: symbols (Unicode art), kitty graphics protocol, sixels, and iTerm2 inline images — auto-detected from the terminal environment.
 
 ## Tech Stack
 
@@ -25,9 +25,14 @@ npx tsx examples/basic-line.tsx  # Run example
 ## Architecture
 
 ```
-opts + data → [DOM shim] → [uPlot on node-canvas] → [getImageData] → [chafa-wasm] → [Ink <Text>]
-                                                                         ↓
-                                                              text axes (axes.ts) → [Ink <Text>]
+symbols mode:
+  opts + data → [DOM shim] → [uPlot on node-canvas] → [getImageData] → [chafa-wasm] → [Ink <Text>]
+                                                                           ↓
+                                                                text axes (axes.ts) → [Ink <Text>]
+
+raw mode (kitty/sixels/iterm2):
+  opts + data → [DOM shim] → [uPlot on node-canvas + axes] → [getImageData] → [chafa-wasm] → stdout
+                                                                                  (Ink renders placeholder lines only)
 ```
 
 ### Source Files
@@ -40,7 +45,7 @@ opts + data → [DOM shim] → [uPlot on node-canvas] → [getImageData] → [ch
 | `src/axes.ts` | Nice-numbers tick calculation (Heckbert 1990), tick positioning, timestamp auto-detection and formatting. |
 | `src/braille.ts` | Pure function: pixel buffer → Unicode Braille string. 2x4 dot grid per character cell. Legacy/alternative renderer. |
 | `src/color-sampler.ts` | Per-cell dominant color extraction → ANSI color name. Used with braille renderer. |
-| `src/InkUPlot.tsx` | React Ink component. Renders chart via chafa-wasm, composes text axes (left/right Y, bottom X), supports dual Y-axis and custom formatters. |
+| `src/InkUPlot.tsx` | React Ink component. Auto-detects terminal format via `detectFormat()`. Symbols mode: renders chart via chafa-wasm with text axes. Raw mode (kitty/sixels/iterm2): writes image directly to stdout, Ink renders placeholder lines. |
 | `src/types.ts` | Shared TypeScript interfaces (InkUPlotProps, BrailleOptions, etc.). |
 | `src/index.ts` | Public API exports. |
 
@@ -60,7 +65,13 @@ opts + data → [DOM shim] → [uPlot on node-canvas] → [getImageData] → [ch
 
 7. **Text axes from data** — uPlot's canvas-rendered axes are hidden (`show: false`). The component calculates tick positions using the nice-numbers algorithm, renders Y-axis labels as `<Text>` (left/right based on `side` in opts.axes), and X-axis ticks at the bottom. Supports custom `values` formatter on axes (uPlot-compatible signature).
 
-8. **Canvas dimension cap** — `MAX_CANVAS_PX = 4096` prevents chafa-wasm WASM heap OOB access on very large terminals.
+8. **Canvas dimension cap** — `MAX_DIM = 4096` and `MAX_PIXELS = 2M` prevent chafa-wasm WASM heap OOB access on large terminals.
+
+9. **Terminal format auto-detection** — `detectFormat()` checks env vars in priority order: `TERM` (most reliable, propagates through SSH) → `TERM_PROGRAM` → terminal-specific vars (`KITTY_WINDOW_ID`, `ITERM_SESSION_ID`, etc.) → fallback to 'symbols'. Result is cached at module level.
+
+10. **Raw format rendering** — Kitty/sixels/iterm2 images bypass Ink's text rendering entirely. The image is written directly to `process.stdout.write()` with absolute cursor positioning (`\x1b[1;1H`). Ink only renders invisible placeholder lines to reserve vertical space. `setOutput()` is NOT called in raw mode — Ink re-renders write spaces that erase kitty images.
+
+11. **Render serialization** — `renderToImageData` uses global DOM state and is not reentrant. A module-level `renderLock` promise chain serializes all async render calls.
 
 ## Examples
 

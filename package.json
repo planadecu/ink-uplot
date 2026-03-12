@@ -1,6 +1,6 @@
 {
   "name": "ink-uplot",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Render uPlot charts in the terminal with truecolor Unicode block art via React Ink and chafa-wasm",
   "type": "module",
   "main": "dist/index.js",
