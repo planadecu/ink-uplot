@@ -3,7 +3,6 @@ import {
   detectFormat,
   isKitty,
   isRawFormat,
-  isNativeKitty,
   kittyDelete,
   kittyTagImage,
   iterm2Escape,
@@ -64,9 +63,9 @@ describe('detectFormat', () => {
     expect(detectFormat()).toBe('iterm2');
   });
 
-  it('detects vscode as kitty via TERM_PROGRAM', () => {
+  it('detects vscode as iterm2 via TERM_PROGRAM (kitty out-of-band writes do not display there)', () => {
     process.env.TERM_PROGRAM = 'vscode';
-    expect(detectFormat()).toBe('kitty');
+    expect(detectFormat()).toBe('iterm2');
   });
 
   it('TERM wins over TERM_PROGRAM (propagates through SSH)', () => {
@@ -98,18 +97,6 @@ describe('format predicates', () => {
     expect(isRawFormat('sixels')).toBe(true);
     expect(isRawFormat('iterm2')).toBe(true);
     expect(isRawFormat('symbols')).toBe(false);
-  });
-
-  it('isNativeKitty is false inside vscode, true otherwise', () => {
-    const saved = process.env.TERM_PROGRAM;
-    process.env.TERM_PROGRAM = 'vscode';
-    expect(isNativeKitty()).toBe(false);
-    process.env.TERM_PROGRAM = 'kitty';
-    expect(isNativeKitty()).toBe(true);
-    delete process.env.TERM_PROGRAM;
-    expect(isNativeKitty()).toBe(true);
-    if (saved === undefined) delete process.env.TERM_PROGRAM;
-    else process.env.TERM_PROGRAM = saved;
   });
 });
 

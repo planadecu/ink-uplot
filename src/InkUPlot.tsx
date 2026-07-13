@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 import { renderToImageData, renderToPNG } from './renderer.js';
 import { pixelsToTerminal } from './chafa.js';
 import { computeScales, buildYLabels, buildXLabelLine } from './axes.js';
-import { detectFormat, isKitty, isNativeKitty, isRawFormat, kittyDelete, kittyTagImage, iterm2Escape } from './format.js';
+import { detectFormat, isKitty, isRawFormat, kittyDelete, kittyTagImage, iterm2Escape } from './format.js';
 import type { InkUPlotProps } from './types.js';
 
 // Serialize render calls — renderToImageData uses global DOM state and is not reentrant
@@ -23,8 +23,40 @@ export function InkUPlot({
   format = detectedFormat,
   color = true,
 }: InkUPlotProps) {
-  const termCols = width ?? process.stdout.columns ?? 80;
   const rawMode = isRawFormat(format);
+
+  // Live terminal dimensions — these change on every resize event during a drag.
+  const liveCols = width ?? process.stdout.columns ?? 80;
+  const liveRows = height;
+
+  // Freeze the whole layout during a resize drag. Repainting the reserved Ink box while
+  // the terminal reflows — and retransmitting images out-of-band — wedges some terminals
+  // (VSCode freezes hard). We hold the last committed size steady through the drag, then
+  // commit the new size and redraw once it settles (~150ms after the last resize event).
+  const resizingRef = useRef(false);
+  const [resizeTick, setResizeTick] = useState(0);
+  const [committed, setCommitted] = useState({ cols: liveCols, rows: liveRows });
+  useEffect(() => {
+    const out = process.stdout;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onResize = () => {
+      resizingRef.current = true;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        resizingRef.current = false;
+        setResizeTick(t => t + 1); // commit + redraw once at the settled size
+      }, 250);
+    };
+    out.on('resize', onResize);
+    return () => { clearTimeout(timer); out.off('resize', onResize); };
+  }, []);
+  // Commit new dimensions only when NOT mid-drag; the settle above bumps resizeTick to re-run this.
+  useEffect(() => {
+    if (!resizingRef.current) setCommitted({ cols: liveCols, rows: liveRows });
+  }, [liveCols, liveRows, resizeTick]);
+
+  const termCols = committed.cols;
+  const effHeight = committed.rows;
 
   // For raw formats (kitty/sixels/iterm2), uPlot renders its own canvas axes,
   // so we use the full terminal area. For symbols mode, reserve space for text axes.
@@ -50,7 +82,7 @@ export function InkUPlot({
   // Raw formats use full terminal area (uPlot draws its own axes on canvas).
   // Symbols mode reserves space for text axes.
   const chartCols = rawMode ? termCols : Math.max(1, termCols - leftLabelWidth - rightLabelWidth);
-  const chartRows = rawMode ? height : Math.max(1, showAxes ? height - 2 : height);
+  const chartRows = rawMode ? effHeight : Math.max(1, showAxes ? effHeight - 2 : effHeight);
 
   // Cap canvas pixel dimensions to avoid WASM memory issues.
   const MAX_DIM = 4096;
@@ -79,6 +111,9 @@ export function InkUPlot({
     // Serialize through renderLock — renderToImageData is not reentrant
     renderLock = renderLock.then(async () => {
       if (cancelled) return;
+      // Don't transmit images while a resize is in flight — it can freeze the terminal.
+      // The trailing resizeTick render redraws cleanly once the size settles.
+      if (resizingRef.current && isRawFormat(format)) return;
       try {
         let ansi: string;
 
@@ -98,17 +133,21 @@ export function InkUPlot({
           });
         }
         if (cancelled) return;
+        // Re-check after the (slow) render: a resize may have started while this frame
+        // was rendering. Writing its image now would land mid-reflow and freeze the terminal.
+        if (resizingRef.current && isRawFormat(format)) return;
 
-        if (isKitty(format) && isNativeKitty()) {
-          // Native kitty: double-buffer with image IDs to avoid flicker
+        if (isKitty(format)) {
+          // Kitty images live in a graphics plane, so text repaints don't erase them.
+          // Double-buffer with alternating image IDs (place new, delete old) to avoid flicker.
           const newId = kittyIdRef.current;
           const oldId = newId === 1 ? 2 : 1;
           kittyIdRef.current = oldId;
           const tagged = kittyTagImage(ansi, newId);
           process.stdout.write(`\x1b[1;1H${tagged}${kittyDelete(oldId)}`);
         } else if (isRawFormat(format)) {
-          // Non-native raw (e.g. kitty-in-vscode): Ink placed cursor after the Box,
-          // so move up to the start of the reserved area before writing the image.
+          // Inline images (iterm2/sixels) occupy character cells. Ink placed the cursor
+          // after the reserved Box, so move up to the top of it before writing the image.
           process.stdout.write(`\x1b[${chartRows}A\x1b[1G${ansi}`);
         } else {
           setOutput(ansi);
@@ -124,13 +163,14 @@ export function InkUPlot({
     });
 
     return () => { cancelled = true; };
-  }, [opts, data, canvasWidth, canvasHeight, chartCols, chartRows, format, color]);
+  }, [opts, data, canvasWidth, canvasHeight, chartCols, chartRows, format, color, resizeTick]);
 
   if (error) {
     return <Text color="red">Error rendering chart: {error}</Text>;
   }
 
-  // Raw formats write directly to stdout — reserve space without text content.
+  // Raw formats write the image directly to stdout, so we reserve space with an empty
+  // box (no glyphs) and let the out-of-band image show through.
   if (isRawFormat(format)) {
     return <Box width={termCols} height={chartRows} />;
   }

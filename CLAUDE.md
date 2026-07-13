@@ -114,3 +114,11 @@ Tests are in `test/`. Each source module has a corresponding test file:
 - uPlot must not be statically imported elsewhere before the renderer's first call
 - node-canvas requires system Cairo/Pango libraries
 - Shaded area fills need alpha >= 0.3 to be visible through chafa
+- **VSCode terminal + live resize:** VSCode's integrated terminal renders iTerm2 inline
+  images fine in steady state, but its image renderer wedges (hard freeze) when you resize
+  the terminal *during* a continuously updating chart — it can't reflow + decode the image
+  stream mid-drag. The component pauses image writes and freezes layout during a resize
+  (see `resizingRef`/`committed` in `InkUPlot.tsx`), which is enough for kitty/ghostty, but
+  VSCode still freezes because it chokes on the already-displayed image during reflow. This
+  is a VSCode/xterm.js limitation, not fixable from our side. Static charts resize fine.
+  Real iTerm2, WezTerm, kitty, ghostty are unaffected.
