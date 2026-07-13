@@ -158,7 +158,7 @@ export function computeScales(
       const series = data[idx];
       if (!series) continue;
       for (const v of series) {
-        if (v == null || v === 0) continue;
+        if (v == null) continue; // null is uPlot's gap marker; 0 is real data, keep it
         if (v < min) min = v;
         if (v > max) max = v;
       }

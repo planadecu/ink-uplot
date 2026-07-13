@@ -131,12 +131,22 @@ describe('computeScales', () => {
     expect(xTicks.labels.some(l => /^\d{4}-\d{2}-\d{2}$/.test(l))).toBe(true);
   });
 
-  it('falls back to a 0..1 scale when a series has no usable values', () => {
+  it('includes zero in the Y range (0 is real data, not a gap)', () => {
     const data = [
-      [0, 1, 2],
-      [0, 0, 0],  // all zeros are ignored as "no data"
+      [0, 1, 2, 3],
+      [5, 0, -3, 2],  // crosses zero
     ];
     const { yScales } = computeScales(data, [{}, {}], []);
+    expect(yScales[0].ticks.min).toBeLessThanOrEqual(-3);
+    expect(yScales[0].ticks.max).toBeGreaterThanOrEqual(5);
+  });
+
+  it('falls back to a 0..1 scale when a series is entirely null (uPlot gaps)', () => {
+    const data = [
+      [0, 1, 2],
+      [null, null, null],
+    ];
+    const { yScales } = computeScales(data as any, [{}, {}], []);
     expect(yScales[0].ticks.min).toBe(0);
     expect(yScales[0].ticks.max).toBeGreaterThanOrEqual(1);
   });
