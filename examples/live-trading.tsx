@@ -18,6 +18,8 @@ function App({ exit }: { exit: () => void }) {
   const [size, setSize] = useState({ cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 });
   const startTime = useRef(Date.now());
   const priceRef = useRef(100);
+  const frameTimesRef = useRef<number[]>([]);
+  const [fps, setFps] = useState(0);
 
   // Seed initial buffer
   const [buf, setBuf] = useState<{ xs: number[]; ys: number[] }>(() => {
@@ -44,6 +46,13 @@ function App({ exit }: { exit: () => void }) {
       const elapsed = (Date.now() - startTime.current) / 1000;
       const newPrice = generatePrice(priceRef.current);
       priceRef.current = newPrice;
+
+      const now = performance.now();
+      const times = frameTimesRef.current;
+      times.push(now);
+      // Keep only the last second of frame timestamps
+      while (times.length > 0 && times[0] < now - 1000) times.shift();
+      setFps(times.length);
 
       setBuf(prev => {
         const xs = [...prev.xs.slice(1), elapsed];
@@ -99,6 +108,7 @@ function App({ exit }: { exit: () => void }) {
         <Text> </Text>
         <Text color={direction} bold>{arrow} {lastPrice.toFixed(2)}</Text>
         <Text dimColor>  ({buf.xs[buf.xs.length - 1].toFixed(1)}s)</Text>
+        <Text dimColor>  {fps} fps</Text>
       </Box>
       <InkUPlot
         opts={opts}

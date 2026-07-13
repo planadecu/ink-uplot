@@ -63,13 +63,13 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
-export async function renderToImageData(
+async function renderChart(
   opts: Omit<uPlotType.Options, 'width' | 'height'> & { width?: number; height?: number },
   data: uPlotType.AlignedData,
   canvasWidth: number,
   canvasHeight: number,
-  format: RenderFormat = 'symbols',
-): Promise<{ data: Uint8ClampedArray; width: number; height: number }> {
+  format: RenderFormat,
+) {
   const shim = installDOMShim(canvasWidth, canvasHeight);
 
   try {
@@ -93,9 +93,25 @@ export async function renderToImageData(
 
     await flushMicrotasks();
 
-    const ctx = shim.canvas.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+    return { canvas: shim.canvas, chart };
+  } catch (err) {
+    uninstallDOMShim();
+    throw err;
+  }
+}
 
+export async function renderToImageData(
+  opts: Omit<uPlotType.Options, 'width' | 'height'> & { width?: number; height?: number },
+  data: uPlotType.AlignedData,
+  canvasWidth: number,
+  canvasHeight: number,
+  format: RenderFormat = 'symbols',
+): Promise<{ data: Uint8ClampedArray; width: number; height: number }> {
+  const { canvas, chart } = await renderChart(opts, data, canvasWidth, canvasHeight, format);
+
+  try {
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
     chart.destroy();
 
     return {
@@ -103,6 +119,28 @@ export async function renderToImageData(
       width: imageData.width,
       height: imageData.height,
     };
+  } finally {
+    uninstallDOMShim();
+  }
+}
+
+/**
+ * Render chart and return a PNG buffer directly from node-canvas.
+ * Much faster than getImageData → chafa for formats that accept PNG (iterm2).
+ */
+export async function renderToPNG(
+  opts: Omit<uPlotType.Options, 'width' | 'height'> & { width?: number; height?: number },
+  data: uPlotType.AlignedData,
+  canvasWidth: number,
+  canvasHeight: number,
+  format: RenderFormat = 'iterm2',
+): Promise<Buffer> {
+  const { canvas, chart } = await renderChart(opts, data, canvasWidth, canvasHeight, format);
+
+  try {
+    const png = canvas.toBuffer('image/png');
+    chart.destroy();
+    return png;
   } finally {
     uninstallDOMShim();
   }

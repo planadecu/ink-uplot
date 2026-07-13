@@ -96,3 +96,121 @@ export function tickToCol(value: number, min: number, max: number, totalCols: nu
   const ratio = (value - min) / (max - min);
   return Math.round(ratio * (totalCols - 1));
 }
+
+export interface ScaleInfo {
+  ticks: TickResult;
+  side: 'left' | 'right';
+}
+
+export interface ScalesResult {
+  xTicks: TickResult;
+  yScales: ScaleInfo[];
+}
+
+/**
+ * Compute X and Y scales from uPlot data and opts.
+ * Returns null if axes should not be shown.
+ */
+export function computeScales(
+  data: readonly (number | null | undefined)[][],
+  seriesDefs: readonly Record<string, any>[],
+  axisDefs: readonly Record<string, any>[],
+): ScalesResult {
+  const xValues = data[0] as number[];
+  let xMin = Infinity, xMax = -Infinity;
+  for (const v of xValues) { if (v < xMin) xMin = v; if (v > xMax) xMax = v; }
+
+  // X-axis: use custom formatter from axisDefs[0].values, or auto-detect timestamps
+  const xAxisDef = axisDefs[0];
+  let xFormatter: ((v: number) => string) | undefined;
+  if (typeof xAxisDef?.values === 'function') {
+    xFormatter = (v: number) => {
+      const result = xAxisDef.values(null, [v], 0, 0);
+      return Array.isArray(result) ? String(result[0]) : String(result);
+    };
+  } else if (looksLikeTimestamps(xValues)) {
+    xFormatter = formatTimestamp;
+  }
+  const xTicks = calculateTicks(xMin, xMax, 6, xFormatter);
+
+  // Group series by scale name
+  const scaleGroups = new Map<string, number[]>();
+  for (let i = 1; i < data.length; i++) {
+    const scaleName = seriesDefs[i]?.scale ?? 'y';
+    if (!scaleGroups.has(scaleName)) scaleGroups.set(scaleName, []);
+    scaleGroups.get(scaleName)!.push(i);
+  }
+
+  // Map scale name → side from axis definitions
+  const scaleSideMap = new Map<string, 'left' | 'right'>();
+  for (const ax of axisDefs) {
+    if (ax?.scale) {
+      scaleSideMap.set(ax.scale, ax.side === 1 ? 'right' : 'left');
+    }
+  }
+
+  // Build scale info for each group
+  const yScales: ScaleInfo[] = [];
+  let scaleIdx = 0;
+  for (const [scaleName, indices] of scaleGroups) {
+    let min = Infinity, max = -Infinity;
+    for (const idx of indices) {
+      const series = data[idx];
+      if (!series) continue;
+      for (const v of series) {
+        if (v == null || v === 0) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+    }
+    if (min === Infinity) { min = 0; max = 1; }
+    const ticks = calculateTicks(min, max);
+    const side = scaleSideMap.get(scaleName) ?? (scaleIdx === 0 ? 'left' : 'right');
+    yScales.push({ ticks, side });
+    scaleIdx++;
+  }
+
+  return { xTicks, yScales };
+}
+
+export function buildYLabels(
+  yTicks: TickResult,
+  chartRows: number,
+  labelWidth: number,
+  side: 'left' | 'right',
+): string[] {
+  const labels: string[] = new Array(chartRows).fill('');
+
+  for (let i = 0; i < yTicks.values.length; i++) {
+    const row = tickToRow(yTicks.values[i], yTicks.min, yTicks.max, chartRows);
+    if (row >= 0 && row < chartRows && labels[row] === '') {
+      if (side === 'left') {
+        labels[row] = yTicks.labels[i].padStart(labelWidth - 1) + ' ';
+      } else {
+        labels[row] = ' ' + yTicks.labels[i].padEnd(labelWidth - 1);
+      }
+    }
+  }
+
+  return labels.map(l => l || ' '.repeat(labelWidth));
+}
+
+export function buildXLabelLine(
+  xTicks: TickResult,
+  chartCols: number,
+): string {
+  const line = new Array(chartCols).fill(' ');
+
+  for (let i = 0; i < xTicks.values.length; i++) {
+    const col = tickToCol(xTicks.values[i], xTicks.min, xTicks.max, chartCols);
+    const label = xTicks.labels[i];
+    const start = Math.max(0, col - Math.floor(label.length / 2));
+    if (start + label.length <= chartCols) {
+      for (let j = 0; j < label.length; j++) {
+        line[start + j] = label[j];
+      }
+    }
+  }
+
+  return line.join('');
+}

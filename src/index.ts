@@ -1,5 +1,5 @@
 export { InkUPlot, detectFormat } from './InkUPlot.js';
-export { renderToImageData } from './renderer.js';
+export { renderToImageData, renderToPNG } from './renderer.js';
 export { pixelsToBraille } from './braille.js';
 export { sampleCellColors } from './color-sampler.js';
 export { pixelsToTerminal } from './chafa.js';
