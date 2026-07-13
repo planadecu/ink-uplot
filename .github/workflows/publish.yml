@@ -23,8 +23,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          registry-url: 'https://registry.npmjs.org'
           cache: 'pnpm'
+          # NOTE: intentionally no `registry-url`. It writes an .npmrc with
+          # `_authToken=${NODE_AUTH_TOKEN}` and a placeholder token, which shadows OIDC
+          # trusted publishing (the placeholder is used instead → E404). Leaving it out
+          # lets npm publish authenticate via the OIDC id-token exchange.
       - name: Configure Git
         run: |
           git config --global user.name 'GitHub Actions'
@@ -38,8 +41,10 @@ jobs:
           git add package.json pnpm-lock.yaml
           git commit -m "Bump version [skip ci]"
           git push
-      # Publish via npm Trusted Publishing (OIDC). No token needed: pnpm exchanges the
-      # GitHub id-token (permissions.id-token: write above) for a short-lived publish
-      # credential and attaches provenance automatically. Requires a Trusted Publisher
-      # to be configured for this package on npmjs.com (repo + this workflow filename).
-      - run: pnpm publish --no-git-checks
+      # Publish via npm Trusted Publishing (OIDC). No token needed: npm exchanges the
+      # GitHub id-token (permissions.id-token: write) for a short-lived publish credential
+      # and attaches provenance automatically. Requires a Trusted Publisher configured for
+      # this package on npmjs.com (repo + this workflow filename). npm >= 11.5.1 is required
+      # for OIDC trusted publishing, so upgrade the bundled npm first.
+      - run: npm install -g npm@latest
+      - run: npm publish
