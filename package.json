@@ -17,7 +17,7 @@
   },
   "sideEffects": false,
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --external canvas --external uplot --external react --external ink --external path2d --external chafa-wasm",
+    "build": "tsup src/index.ts --format esm --external canvas --external uplot --external react --external ink --external path2d --external chafa-wasm && tsc --emitDeclarationOnly",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -82,7 +82,7 @@
     "react": "^19.2.7",
     "tsup": "^8.5.1",
     "tsx": "^4.23.0",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "uplot": "^1.6.32",
     "vitest": "^4.1.10"
   },
