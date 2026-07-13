@@ -1,11 +1,25 @@
 import ChafaFactory from 'chafa-wasm';
 
 let chafaModule: any | null = null;
+let callsSinceInit = 0;
+
+// chafa-wasm (0.3.3) leaks ~1.7MB of WASM heap per imageToAnsi call — at 10fps this
+// exhausts native memory in under a minute and aborts the process (Cairo/GLib OOM).
+// Emscripten never shrinks its heap, and the leak is inside chafa's compiled C, so the
+// only reclaim is to drop the whole module and let GC free its ArrayBuffer. Recreating
+// is cheap (~5-8ms — the engine caches the compiled module), so reclaim often to keep
+// peak memory a few hundred MB. At 10fps this is one imperceptible hitch every ~6s.
+const RECREATE_EVERY_CALLS = 60;
 
 async function getChafa() {
+  if (chafaModule && callsSinceInit >= RECREATE_EVERY_CALLS) {
+    chafaModule = null; // release the leaked instance; GC reclaims its WASM heap
+    callsSinceInit = 0;
+  }
   if (!chafaModule) {
     chafaModule = await ChafaFactory();
   }
+  callsSinceInit++;
   return chafaModule;
 }
 

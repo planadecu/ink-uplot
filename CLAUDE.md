@@ -73,6 +73,8 @@ raw mode (kitty/sixels/iterm2):
 
 11. **Render serialization** — `renderToImageData` uses global DOM state and is not reentrant. A module-level `renderLock` promise chain serializes all async render calls.
 
+12. **chafa-wasm leak workaround** — chafa-wasm 0.3.3 leaks ~1.7MB of WASM heap per `imageToAnsi` call (leak is in its compiled C; Emscripten never shrinks the heap). At 10fps this exhausts native memory and aborts the process (Cairo/GLib OOM) within ~1 min. `getChafa()` drops and recreates the module every `RECREATE_EVERY_CALLS` (60) calls so GC reclaims the leaked ArrayBuffer — reinit is ~5-8ms (compiled module is cached), bounding peak memory to a few hundred MB. Only affects chafa formats (symbols/kitty/sixels); iterm2 uses `renderToPNG` and is unaffected.
+
 ## Examples
 
 Examples are in `examples/`. Run with `npx tsx examples/<name>.tsx`.
