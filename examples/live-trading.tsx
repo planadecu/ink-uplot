@@ -35,10 +35,19 @@ function App({ exit }: { exit: () => void }) {
     return { xs, ys };
   });
 
+  // A drag fires a resize event every few ms. Reacting to each one thrashes layout, so
+  // debounce to a single trailing update (~200ms after the last event) — effectively
+  // "resize on mouse release". Loses live-resize animation, gains stability.
   useEffect(() => {
-    const onResize = () => setSize({ cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onResize = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        setSize({ cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 });
+      }, 200);
+    };
     stdout.on('resize', onResize);
-    return () => { stdout.off('resize', onResize); };
+    return () => { clearTimeout(timer); stdout.off('resize', onResize); };
   }, [stdout]);
 
   useEffect(() => {
