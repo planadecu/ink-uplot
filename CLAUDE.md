@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-ink-uplot renders uPlot charts in the terminal via React Ink. It reuses standard browser uPlot configuration objects and produces truecolor Unicode block art using chafa-wasm, with text-based axes rendered as Ink `<Text>` components.
+ink-uplot renders uPlot charts in the terminal via React Ink. It reuses standard browser uPlot configuration objects and produces truecolor Unicode block art using chafa-wasm, with text-based axes rendered as Ink `<Text>` components. Supports multiple output formats: symbols (Unicode art), kitty graphics protocol, sixels, and iTerm2 inline images — auto-detected from the terminal environment.
 
 ## Tech Stack
 
@@ -25,9 +25,14 @@ npx tsx examples/basic-line.tsx  # Run example
 ## Architecture
 
 ```
-opts + data → [DOM shim] → [uPlot on node-canvas] → [getImageData] → [chafa-wasm] → [Ink <Text>]
-                                                                         ↓
-                                                              text axes (axes.ts) → [Ink <Text>]
+symbols mode:
+  opts + data → [DOM shim] → [uPlot on node-canvas] → [getImageData] → [chafa-wasm] → [Ink <Text>]
+                                                                           ↓
+                                                                text axes (axes.ts) → [Ink <Text>]
+
+raw mode (kitty/sixels/iterm2):
+  opts + data → [DOM shim] → [uPlot on node-canvas + axes] → [getImageData] → [chafa-wasm] → stdout
+                                                                                  (Ink renders placeholder lines only)
 ```
 
 ### Source Files
@@ -40,7 +45,7 @@ opts + data → [DOM shim] → [uPlot on node-canvas] → [getImageData] → [ch
 | `src/axes.ts` | Nice-numbers tick calculation (Heckbert 1990), tick positioning, timestamp auto-detection and formatting. |
 | `src/braille.ts` | Pure function: pixel buffer → Unicode Braille string. 2x4 dot grid per character cell. Legacy/alternative renderer. |
 | `src/color-sampler.ts` | Per-cell dominant color extraction → ANSI color name. Used with braille renderer. |
-| `src/InkUPlot.tsx` | React Ink component. Renders chart via chafa-wasm, composes text axes (left/right Y, bottom X), supports dual Y-axis and custom formatters. |
+| `src/InkUPlot.tsx` | React Ink component. Auto-detects terminal format via `detectFormat()`. Symbols mode: renders chart via chafa-wasm with text axes. Raw mode (kitty/sixels/iterm2): writes image directly to stdout, Ink renders placeholder lines. |
 | `src/types.ts` | Shared TypeScript interfaces (InkUPlotProps, BrailleOptions, etc.). |
 | `src/index.ts` | Public API exports. |
 
@@ -60,7 +65,15 @@ opts + data → [DOM shim] → [uPlot on node-canvas] → [getImageData] → [ch
 
 7. **Text axes from data** — uPlot's canvas-rendered axes are hidden (`show: false`). The component calculates tick positions using the nice-numbers algorithm, renders Y-axis labels as `<Text>` (left/right based on `side` in opts.axes), and X-axis ticks at the bottom. Supports custom `values` formatter on axes (uPlot-compatible signature).
 
-8. **Canvas dimension cap** — `MAX_CANVAS_PX = 4096` prevents chafa-wasm WASM heap OOB access on very large terminals.
+8. **Canvas dimension cap** — `MAX_DIM = 4096` and `MAX_PIXELS = 2M` prevent chafa-wasm WASM heap OOB access on large terminals.
+
+9. **Terminal format auto-detection** — `detectFormat()` checks env vars in priority order: `TERM` (most reliable, propagates through SSH) → `TERM_PROGRAM` → terminal-specific vars (`KITTY_WINDOW_ID`, `ITERM_SESSION_ID`, etc.) → fallback to 'symbols'. Result is cached at module level.
+
+10. **Raw format rendering** — Kitty/sixels/iterm2 images bypass Ink's text rendering entirely. The image is written directly to `process.stdout.write()` with absolute cursor positioning (`\x1b[1;1H`). Ink only renders invisible placeholder lines to reserve vertical space. `setOutput()` is NOT called in raw mode — Ink re-renders write spaces that erase kitty images.
+
+11. **Render serialization** — `renderToImageData` uses global DOM state and is not reentrant. A module-level `renderLock` promise chain serializes all async render calls.
+
+12. **chafa-wasm leak workaround** — chafa-wasm 0.3.3 leaks ~1.7MB of WASM heap per `imageToAnsi` call (leak is in its compiled C; Emscripten never shrinks the heap). At 10fps this exhausts native memory and aborts the process (Cairo/GLib OOM) within ~1 min. `getChafa()` drops and recreates the module every `RECREATE_EVERY_CALLS` (60) calls so GC reclaims the leaked ArrayBuffer — reinit is ~5-8ms (compiled module is cached), bounding peak memory to a few hundred MB. Only affects chafa formats (symbols/kitty/sixels); iterm2 uses `renderToPNG` and is unaffected.
 
 ## Examples
 
@@ -103,3 +116,11 @@ Tests are in `test/`. Each source module has a corresponding test file:
 - uPlot must not be statically imported elsewhere before the renderer's first call
 - node-canvas requires system Cairo/Pango libraries
 - Shaded area fills need alpha >= 0.3 to be visible through chafa
+- **VSCode terminal + live resize:** VSCode's integrated terminal renders iTerm2 inline
+  images fine in steady state, but its image renderer wedges (hard freeze) when you resize
+  the terminal *during* a continuously updating chart — it can't reflow + decode the image
+  stream mid-drag. The component pauses image writes and freezes layout during a resize
+  (see `resizingRef`/`committed` in `InkUPlot.tsx`), which is enough for kitty/ghostty, but
+  VSCode still freezes because it chokes on the already-displayed image during reflow. This
+  is a VSCode/xterm.js limitation, not fixable from our side. Static charts resize fine.
+  Real iTerm2, WezTerm, kitty, ghostty are unaffected.

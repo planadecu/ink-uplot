@@ -3,16 +3,13 @@ import type uPlotType from 'uplot';
 
 let uPlotCtor: typeof uPlotType | null = null;
 
-export interface RenderOptions {
-  /** Strip axes/grid and boost line width for braille. Default: true. */
-  brailleMode?: boolean;
-}
+export type RenderFormat = 'symbols' | 'kitty' | 'sixels' | 'iterm2';
 
 function sanitizeOpts(
   opts: Omit<uPlotType.Options, 'width' | 'height'> & { width?: number; height?: number },
   width: number,
   height: number,
-  brailleMode: boolean,
+  format: RenderFormat,
 ): uPlotType.Options {
   const base: uPlotType.Options = {
     ...opts,
@@ -24,8 +21,8 @@ function sanitizeOpts(
     focus: { alpha: 1 },
   };
 
-  if (brailleMode) {
-    // Hide axes and grid — they render as noisy braille dots.
+  if (format === 'symbols') {
+    // Braille mode: hide axes (rendered as text by the component), thin lines.
     base.axes = (opts.axes ?? []).map(a => ({
       ...a,
       show: false,
@@ -33,22 +30,20 @@ function sanitizeOpts(
       ticks: { ...a?.ticks, show: false },
     }));
 
-    // Boost line width for braille (2x4 dot grid needs thicker lines).
     base.series = (opts.series ?? []).map((s, i) => {
       if (i === 0) return s;
       return { ...s, width: Math.max((s as any).width ?? 1, 3) };
     });
   } else {
-    // Chafa/Sixel mode: hide axes (rendered as text by the component instead).
+    // Pixel-perfect mode (kitty/sixels/iterm2): keep uPlot's canvas axes.
     base.axes = (opts.axes ?? []).map(a => ({
       ...a,
-      show: false,
-      grid: { ...a?.grid, show: false },
-      ticks: { ...a?.ticks, show: false },
+      stroke: a?.stroke ?? '#888',
+      grid: { show: true, stroke: '#333', ...a?.grid },
+      ticks: { show: true, stroke: '#555', ...a?.ticks },
+      font: `${Math.max(10, Math.round(height / 40))}px sans-serif`,
     }));
 
-    // Scale line widths up for the higher pixel resolution.
-    // At 8px per terminal column, a 2px line is barely visible.
     base.series = (opts.series ?? []).map((s, i) => {
       if (i === 0) return s;
       const w = (s as any).width ?? 2;
@@ -64,20 +59,17 @@ function sanitizeOpts(
  * uPlot defers rendering via queueMicrotask; we must wait for it to finish.
  */
 async function flushMicrotasks(): Promise<void> {
-  // Two rounds: the first flushes uPlot's _commit, the second catches
-  // any microtasks queued during _commit itself.
   await Promise.resolve();
   await Promise.resolve();
 }
 
-export async function renderToImageData(
+async function renderChart(
   opts: Omit<uPlotType.Options, 'width' | 'height'> & { width?: number; height?: number },
   data: uPlotType.AlignedData,
   canvasWidth: number,
   canvasHeight: number,
-  renderOpts?: RenderOptions,
-): Promise<{ data: Uint8ClampedArray; width: number; height: number }> {
-  const brailleMode = renderOpts?.brailleMode ?? true;
+  format: RenderFormat,
+) {
   const shim = installDOMShim(canvasWidth, canvasHeight);
 
   try {
@@ -86,27 +78,40 @@ export async function renderToImageData(
       uPlotCtor = mod.default;
     }
 
-    // Fill canvas background with black so sixel doesn't get transparent pixels.
-    if (!brailleMode) {
+    // Pixel formats need a black background; symbols/braille use transparent canvas.
+    if (format !== 'symbols') {
       const ctx = shim.canvas.getContext('2d');
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
     }
 
-    const sanitized = sanitizeOpts(opts, canvasWidth, canvasHeight, brailleMode);
+    const sanitized = sanitizeOpts(opts, canvasWidth, canvasHeight, format);
 
     const chart = new uPlotCtor(sanitized, data, (self, init) => {
       init();
     });
 
-    // Wait for uPlot's deferred _commit (queued via queueMicrotask) to complete.
-    // This allows _setSize to run before _commit processes the rendering,
-    // avoiding NaN canvas dimensions.
     await flushMicrotasks();
 
-    const ctx = shim.canvas.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+    return { canvas: shim.canvas, chart };
+  } catch (err) {
+    uninstallDOMShim();
+    throw err;
+  }
+}
 
+export async function renderToImageData(
+  opts: Omit<uPlotType.Options, 'width' | 'height'> & { width?: number; height?: number },
+  data: uPlotType.AlignedData,
+  canvasWidth: number,
+  canvasHeight: number,
+  format: RenderFormat = 'symbols',
+): Promise<{ data: Uint8ClampedArray; width: number; height: number }> {
+  const { canvas, chart } = await renderChart(opts, data, canvasWidth, canvasHeight, format);
+
+  try {
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
     chart.destroy();
 
     return {
@@ -114,6 +119,28 @@ export async function renderToImageData(
       width: imageData.width,
       height: imageData.height,
     };
+  } finally {
+    uninstallDOMShim();
+  }
+}
+
+/**
+ * Render chart and return a PNG buffer directly from node-canvas.
+ * Much faster than getImageData → chafa for formats that accept PNG (iterm2).
+ */
+export async function renderToPNG(
+  opts: Omit<uPlotType.Options, 'width' | 'height'> & { width?: number; height?: number },
+  data: uPlotType.AlignedData,
+  canvasWidth: number,
+  canvasHeight: number,
+  format: RenderFormat = 'iterm2',
+): Promise<Buffer> {
+  const { canvas, chart } = await renderChart(opts, data, canvasWidth, canvasHeight, format);
+
+  try {
+    const png = canvas.toBuffer('image/png');
+    chart.destroy();
+    return png;
   } finally {
     uninstallDOMShim();
   }

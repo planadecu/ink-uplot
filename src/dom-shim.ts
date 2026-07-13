@@ -117,6 +117,12 @@ export interface DOMShimResult {
 // by having createElement delegate to a mutable `_currentCreateCanvas` function.
 let _currentCreateCanvas: (() => any) | null = null;
 
+// Canvas cache — reuse native Cairo surfaces to prevent memory leak.
+// At high frame rates (10fps), creating a new ~4.6MB native surface per frame
+// exhausts native heap before GC can collect the old ones.
+let _cachedMainCanvas: Canvas | null = null;
+let _cachedExtraCanvas: Canvas | null = null;
+
 // The single persistent document stub, shared across all installs.
 // uPlot's `doc` will always reference this same object.
 const stubDocument: any = {
@@ -142,45 +148,60 @@ const stubDocument: any = {
 export function installDOMShim(canvasWidth: number, canvasHeight: number): DOMShimResult {
   if (installed) uninstallDOMShim();
 
-  const realCanvas = createCanvas(canvasWidth, canvasHeight);
+  // Reuse cached canvas — setting width/height resets its state (clears content, resets transform).
+  if (!_cachedMainCanvas) {
+    _cachedMainCanvas = createCanvas(canvasWidth, canvasHeight);
+  } else {
+    _cachedMainCanvas.width = canvasWidth;
+    _cachedMainCanvas.height = canvasHeight;
+  }
+  const realCanvas = _cachedMainCanvas;
+
+  if (!_cachedExtraCanvas) {
+    _cachedExtraCanvas = createCanvas(1, 1);
+  }
+
   let canvasUsed = false;
 
-  function wrapCanvas(c: Canvas): any {
+  function wrapCanvas(c: Canvas, w: number, h: number): any {
     const wrapped = c as any;
-    if (!wrapped.classList) wrapped.classList = createClassList();
-    if (!wrapped.style) {
+    // Only patch once — avoid re-wrapping getContext on reuse
+    if (!wrapped.__inkPatched) {
+      wrapped.classList = createClassList();
       wrapped.style = new Proxy({} as Record<string, string>, {
         set(target, prop, value) { target[prop as string] = value; return true; },
         get(target, prop) { return target[prop as string] ?? ''; },
       });
+      wrapped.addEventListener = () => {};
+      wrapped.removeEventListener = () => {};
+      wrapped.appendChild = (child: any) => child;
+      wrapped.insertBefore = (child: any) => child;
+      wrapped.ownerDocument = stubDocument;
+      wrapped.parentNode = null;
+
+      // Patch the 2D context for Path2D support
+      const origGetContext = wrapped.getContext.bind(wrapped);
+      let patchedCtx: any = null;
+      wrapped.getContext = (type: string) => {
+        const ctx = origGetContext(type);
+        if (type === '2d' && ctx && !patchedCtx) {
+          patchCtxForPath2D(ctx);
+          patchedCtx = ctx;
+        }
+        return ctx;
+      };
+
+      wrapped.__inkPatched = true;
     }
-    wrapped.addEventListener = () => {};
-    wrapped.removeEventListener = () => {};
-    wrapped.appendChild = (child: any) => child;
-    wrapped.insertBefore = (child: any) => child;
+    // Always update dimensions (may change between frames)
     wrapped.getBoundingClientRect = () => ({
       x: 0, y: 0, top: 0, left: 0, bottom: 0, right: 0,
-      width: canvasWidth, height: canvasHeight, toJSON() {},
+      width: w, height: h, toJSON() {},
     });
-    wrapped.ownerDocument = stubDocument;
-    wrapped.parentNode = null;
-
-    // Patch the 2D context for Path2D support
-    const origGetContext = wrapped.getContext.bind(wrapped);
-    let patchedCtx: any = null;
-    wrapped.getContext = (type: string) => {
-      const ctx = origGetContext(type);
-      if (type === '2d' && ctx && !patchedCtx) {
-        patchCtxForPath2D(ctx);
-        patchedCtx = ctx;
-      }
-      return ctx;
-    };
-
     return wrapped;
   }
 
-  const wrappedCanvas = wrapCanvas(realCanvas);
+  const wrappedCanvas = wrapCanvas(realCanvas, canvasWidth, canvasHeight);
 
   // Update the canvas factory for the persistent document.
   _currentCreateCanvas = () => {
@@ -188,8 +209,7 @@ export function installDOMShim(canvasWidth: number, canvasHeight: number): DOMSh
       canvasUsed = true;
       return wrappedCanvas;
     }
-    const extra = createCanvas(1, 1);
-    return wrapCanvas(extra);
+    return wrapCanvas(_cachedExtraCanvas!, 1, 1);
   };
 
   const stubMatchMedia = (_query: string) => ({

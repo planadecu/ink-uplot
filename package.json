@@ -1,6 +1,6 @@
 {
   "name": "ink-uplot",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Render uPlot charts in the terminal with truecolor Unicode block art via React Ink and chafa-wasm",
   "type": "module",
   "main": "dist/index.js",
@@ -17,7 +17,7 @@
   },
   "sideEffects": false,
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --external canvas --external uplot --external react --external ink --external path2d --external chafa-wasm",
+    "build": "tsup src/index.ts --format esm --external canvas --external uplot --external react --external ink --external path2d --external chafa-wasm && tsc --emitDeclarationOnly",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -70,21 +70,21 @@
     ]
   },
   "dependencies": {
-    "canvas": "^3.2.1",
+    "canvas": "^3.2.3",
     "chafa-wasm": "^0.3.3",
-    "path2d": "^0.3.1"
+    "path2d": "^0.3.3"
   },
   "devDependencies": {
-    "@types/node": "^25.4.0",
-    "@types/react": "^19.2.14",
-    "ink": "^6.8.0",
+    "@types/node": "^26.1.0",
+    "@types/react": "^19.2.17",
+    "ink": "^7.1.0",
     "ink-testing-library": "^4.0.0",
-    "react": "^19.2.4",
+    "react": "^19.2.7",
     "tsup": "^8.5.1",
-    "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
+    "tsx": "^4.23.0",
+    "typescript": "^7.0.2",
     "uplot": "^1.6.32",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "ink": ">=4.0.0",

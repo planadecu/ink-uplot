@@ -32,12 +32,10 @@ export interface InkUPlotProps {
   width?: number;
   /** Chart height in terminal rows. Defaults to 24. */
   height?: number;
-  /** Luminance threshold for 1-bit conversion (0–255). Default: 128. */
-  threshold?: number;
   /** Show text axes around the chart. Default: true. */
   showAxes?: boolean;
+  /** Output format: 'symbols' (unicode art), 'sixels', 'kitty', 'iterm2'. Default: auto-detected from terminal. */
+  format?: 'symbols' | 'sixels' | 'kitty' | 'iterm2';
   /** Enable ANSI color output. Default: true. */
   color?: boolean;
-  /** Background color assumption. 'dark' = light-on-dark (default). */
-  background?: 'dark' | 'light';
 }

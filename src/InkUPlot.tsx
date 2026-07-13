@@ -1,88 +1,72 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Box, Text } from 'ink';
-import { renderToImageData } from './renderer.js';
+import { renderToImageData, renderToPNG } from './renderer.js';
 import { pixelsToTerminal } from './chafa.js';
-import { calculateTicks, tickToRow, tickToCol, formatTimestamp, looksLikeTimestamps } from './axes.js';
+import { computeScales, buildYLabels, buildXLabelLine } from './axes.js';
+import { detectFormat, isKitty, isRawFormat, kittyDelete, kittyTagImage, iterm2Escape } from './format.js';
 import type { InkUPlotProps } from './types.js';
 
-interface ScaleInfo {
-  ticks: ReturnType<typeof calculateTicks>;
-  side: 'left' | 'right';
-}
+// Serialize render calls — renderToImageData uses global DOM state and is not reentrant
+let renderLock = Promise.resolve();
+
+// Cache auto-detected format (env vars don't change at runtime)
+const detectedFormat = detectFormat();
+
+export { detectFormat } from './format.js';
 
 export function InkUPlot({
   opts,
   data,
   width,
   height = 24,
-  threshold = 128,
   showAxes = true,
+  format = detectedFormat,
   color = true,
-  background = 'dark',
 }: InkUPlotProps) {
-  const termCols = width ?? process.stdout.columns ?? 80;
+  const rawMode = isRawFormat(format);
 
+  // Live terminal dimensions — these change on every resize event during a drag.
+  const liveCols = width ?? process.stdout.columns ?? 80;
+  const liveRows = height;
+
+  // Freeze the layout during a resize drag — repainting the reserved box and retransmitting
+  // images while the terminal reflows can wedge it. Hold the committed size steady through
+  // the drag, then commit the new size and redraw once it settles.
+  const resizingRef = useRef(false);
+  const [resizeTick, setResizeTick] = useState(0);
+  const [committed, setCommitted] = useState({ cols: liveCols, rows: liveRows });
+  useEffect(() => {
+    const out = process.stdout;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onResize = () => {
+      resizingRef.current = true;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        resizingRef.current = false;
+        setResizeTick(t => t + 1); // commit + redraw once at the settled size
+      }, 250);
+    };
+    out.on('resize', onResize);
+    return () => { clearTimeout(timer); out.off('resize', onResize); };
+  }, []);
+  // Commit new dimensions only when NOT mid-drag; the settle above bumps resizeTick to re-run this.
+  useEffect(() => {
+    if (!resizingRef.current) setCommitted({ cols: liveCols, rows: liveRows });
+  }, [liveCols, liveRows, resizeTick]);
+
+  const termCols = committed.cols;
+  const effHeight = committed.rows;
+
+  // For raw formats (kitty/sixels/iterm2), uPlot renders its own canvas axes,
+  // so we use the full terminal area. For symbols mode, reserve space for text axes.
   const scales = useMemo(() => {
-    if (!showAxes) return null;
-    const xValues = data[0] as number[];
-    let xMin = Infinity, xMax = -Infinity;
-    for (const v of xValues) { if (v < xMin) xMin = v; if (v > xMax) xMax = v; }
-
-    // X-axis: use custom formatter from opts.axes[0].values, or auto-detect timestamps
-    const xAxisDef = (opts.axes as any)?.[0];
-    let xFormatter: ((v: number) => string) | undefined;
-    if (typeof xAxisDef?.values === 'function') {
-      xFormatter = (v: number) => {
-        const result = xAxisDef.values(null, [v], 0, 0);
-        return Array.isArray(result) ? String(result[0]) : String(result);
-      };
-    } else if (looksLikeTimestamps(xValues)) {
-      xFormatter = formatTimestamp;
-    }
-    const xTicks = calculateTicks(xMin, xMax, 6, xFormatter);
-
-    // Group series by scale name from opts.series
-    const scaleGroups = new Map<string, number[]>();
-    const seriesDefs = opts.series ?? [];
-    for (let i = 1; i < data.length; i++) {
-      const scaleName = (seriesDefs[i] as any)?.scale ?? 'y';
-      if (!scaleGroups.has(scaleName)) scaleGroups.set(scaleName, []);
-      scaleGroups.get(scaleName)!.push(i);
-    }
-
-    // Build a map from scale name → side using opts.axes
-    const axisDefs = (opts.axes ?? []) as any[];
-    const scaleSideMap = new Map<string, 'left' | 'right'>();
-    for (const ax of axisDefs) {
-      if (ax?.scale) {
-        // uPlot: side 0 = left (default), side 1 = right
-        scaleSideMap.set(ax.scale, ax.side === 1 ? 'right' : 'left');
-      }
-    }
-
-    // Build scale info for each group
-    const yScales: ScaleInfo[] = [];
-    let scaleIdx = 0;
-    for (const [scaleName, indices] of scaleGroups) {
-      let min = Infinity, max = -Infinity;
-      for (const idx of indices) {
-        const series = data[idx];
-        if (!series) continue;
-        for (const v of series) {
-          if (v == null || v === 0) continue;
-          if (v < min) min = v;
-          if (v > max) max = v;
-        }
-      }
-      if (min === Infinity) { min = 0; max = 1; }
-      const ticks = calculateTicks(min, max);
-      const side = scaleSideMap.get(scaleName) ?? (scaleIdx === 0 ? 'left' : 'right');
-      yScales.push({ ticks, side });
-      scaleIdx++;
-    }
-
-    return { xTicks, yScales };
-  }, [data, opts.series, opts.axes, showAxes]);
+    if (!showAxes || rawMode) return null;
+    return computeScales(
+      data as readonly (number | null | undefined)[][],
+      (opts.series ?? []) as readonly Record<string, any>[],
+      ((opts.axes ?? []) as any[]),
+    );
+  }, [data, opts.series, opts.axes, showAxes, rawMode]);
 
   const leftScale = scales?.yScales.find(s => s.side === 'left') ?? null;
   const rightScale = scales?.yScales.find(s => s.side === 'right') ?? null;
@@ -94,51 +78,98 @@ export function InkUPlot({
     ? Math.max(...rightScale.ticks.labels.map(l => l.length)) + 1
     : 0;
 
-  const chartCols = Math.max(1, termCols - leftLabelWidth - rightLabelWidth);
-  const chartRows = Math.max(1, showAxes ? height - 2 : height);
+  // Raw formats use full terminal area (uPlot draws its own axes on canvas).
+  // Symbols mode reserves space for text axes.
+  const chartCols = rawMode ? termCols : Math.max(1, termCols - leftLabelWidth - rightLabelWidth);
+  const chartRows = rawMode ? effHeight : Math.max(1, showAxes ? effHeight - 2 : effHeight);
 
   // Cap canvas pixel dimensions to avoid WASM memory issues.
-  // chafa-wasm operates on a fixed WASM heap; very large buffers cause OOB access.
-  const MAX_CANVAS_PX = 4096;
-  const canvasWidth = Math.min(chartCols * 8, MAX_CANVAS_PX);
-  const canvasHeight = Math.min(chartRows * 16, MAX_CANVAS_PX);
+  const MAX_DIM = 4096;
+  const MAX_PIXELS = 2_000_000;
+  let canvasWidth = Math.min(chartCols * 8, MAX_DIM);
+  let canvasHeight = Math.min(chartRows * 16, MAX_DIM);
+  if (canvasWidth * canvasHeight > MAX_PIXELS) {
+    const scale = Math.sqrt(MAX_PIXELS / (canvasWidth * canvasHeight));
+    canvasWidth = Math.floor(canvasWidth * scale);
+    canvasHeight = Math.floor(canvasHeight * scale);
+  }
 
   const [output, setOutput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const kittyIdRef = useRef(1);
 
-  // Clear stale output immediately when dimensions change
-  useEffect(() => { setOutput(null); setError(null); }, [canvasWidth, canvasHeight]);
+  // Clear stale output when dimensions change (not needed for kitty — bypasses Ink)
+  useEffect(() => {
+    if (!isRawFormat(format)) { setOutput(null); setError(null); }
+  }, [canvasWidth, canvasHeight, format]);
 
   useEffect(() => {
     if (canvasWidth < 8 || canvasHeight < 16) return;
     let cancelled = false;
 
-    (async () => {
+    // Serialize through renderLock — renderToImageData is not reentrant
+    renderLock = renderLock.then(async () => {
+      if (cancelled) return;
+      // Skip image writes mid-resize; the trailing resizeTick render redraws after settle.
+      if (resizingRef.current && isRawFormat(format)) return;
       try {
-        const imageData = await renderToImageData(opts, data, canvasWidth, canvasHeight, { brailleMode: false });
-        if (cancelled) return;
+        let ansi: string;
 
-        const ansi = await pixelsToTerminal(imageData, {
-          width: chartCols,
-          height: chartRows,
-          colors: color ? 'truecolor' : 'none',
-        });
+        if (format === 'iterm2') {
+          // Fast path: node-canvas encodes PNG natively (C), skip chafa WASM entirely.
+          const png = await renderToPNG(opts, data, canvasWidth, canvasHeight, format);
+          if (cancelled) return;
+          ansi = iterm2Escape(png, chartCols, chartRows);
+        } else {
+          const imageData = await renderToImageData(opts, data, canvasWidth, canvasHeight, format);
+          if (cancelled) return;
+          ansi = await pixelsToTerminal(imageData, {
+            width: chartCols,
+            height: chartRows,
+            format,
+            colors: color ? 'truecolor' : 'none',
+          });
+        }
         if (cancelled) return;
+        // Re-check: a resize may have started while this frame was rendering.
+        if (resizingRef.current && isRawFormat(format)) return;
 
-        setOutput(ansi);
+        if (isKitty(format)) {
+          // Kitty images live in a graphics plane, so text repaints don't erase them.
+          // Double-buffer with alternating image IDs (place new, delete old) to avoid flicker.
+          const newId = kittyIdRef.current;
+          const oldId = newId === 1 ? 2 : 1;
+          kittyIdRef.current = oldId;
+          const tagged = kittyTagImage(ansi, newId);
+          process.stdout.write(`\x1b[1;1H${tagged}${kittyDelete(oldId)}`);
+        } else if (isRawFormat(format)) {
+          // Inline images (iterm2/sixels) occupy character cells. Ink placed the cursor
+          // after the reserved Box, so move up to the top of it before writing the image.
+          process.stdout.write(`\x1b[${chartRows}A\x1b[1G${ansi}`);
+        } else {
+          setOutput(ansi);
+        }
         setError(null);
       } catch (err) {
-        if (!cancelled) {
+        // Kitty: swallow errors during resize — next frame will render at correct size.
+        // Other formats: surface the error so Ink can display it.
+        if (!isRawFormat(format)) {
           setError(err instanceof Error ? err.message : String(err));
         }
       }
-    })();
+    });
 
     return () => { cancelled = true; };
-  }, [opts, data, canvasWidth, canvasHeight, chartCols, chartRows, color]);
+  }, [opts, data, canvasWidth, canvasHeight, chartCols, chartRows, format, color, resizeTick]);
 
   if (error) {
     return <Text color="red">Error rendering chart: {error}</Text>;
+  }
+
+  // Raw formats write the image directly to stdout, so we reserve space with an empty
+  // box (no glyphs) and let the out-of-band image show through.
+  if (isRawFormat(format)) {
+    return <Box width={termCols} height={chartRows} />;
   }
 
   if (!output) {
@@ -181,46 +212,4 @@ export function InkUPlot({
       </Box>
     </Box>
   );
-}
-
-function buildYLabels(
-  yTicks: ReturnType<typeof calculateTicks>,
-  chartRows: number,
-  labelWidth: number,
-  side: 'left' | 'right',
-): string[] {
-  const labels: string[] = new Array(chartRows).fill('');
-
-  for (let i = 0; i < yTicks.values.length; i++) {
-    const row = tickToRow(yTicks.values[i], yTicks.min, yTicks.max, chartRows);
-    if (row >= 0 && row < chartRows && labels[row] === '') {
-      if (side === 'left') {
-        labels[row] = yTicks.labels[i].padStart(labelWidth - 1) + ' ';
-      } else {
-        labels[row] = ' ' + yTicks.labels[i].padEnd(labelWidth - 1);
-      }
-    }
-  }
-
-  return labels.map(l => l || ' '.repeat(labelWidth));
-}
-
-function buildXLabelLine(
-  xTicks: ReturnType<typeof calculateTicks>,
-  chartCols: number,
-): string {
-  const line = new Array(chartCols).fill(' ');
-
-  for (let i = 0; i < xTicks.values.length; i++) {
-    const col = tickToCol(xTicks.values[i], xTicks.min, xTicks.max, chartCols);
-    const label = xTicks.labels[i];
-    const start = Math.max(0, col - Math.floor(label.length / 2));
-    if (start + label.length <= chartCols) {
-      for (let j = 0; j < label.length; j++) {
-        line[start + j] = label[j];
-      }
-    }
-  }
-
-  return line.join('');
 }

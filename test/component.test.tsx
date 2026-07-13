@@ -34,7 +34,7 @@ function waitForFrame(
 describe('InkUPlot component', () => {
   it('renders loading state initially', () => {
     const instance = render(
-      <InkUPlot opts={simpleOpts} data={simpleData} width={40} height={10} />,
+      <InkUPlot opts={simpleOpts} data={simpleData} width={40} height={10} format="symbols" />,
     );
     const frame = instance.lastFrame() ?? '';
     expect(frame).toContain('Rendering chart...');
@@ -43,7 +43,7 @@ describe('InkUPlot component', () => {
 
   it('renders chart output after async rendering completes', async () => {
     const instance = render(
-      <InkUPlot opts={simpleOpts} data={simpleData} width={40} height={10} />,
+      <InkUPlot opts={simpleOpts} data={simpleData} width={40} height={10} format="symbols" />,
     );
     const frame = await waitForFrame(instance, f => !f.includes('Rendering chart...'));
     expect(frame.length).toBeGreaterThan(0);
@@ -53,7 +53,7 @@ describe('InkUPlot component', () => {
 
   it('shows axes labels by default', async () => {
     const instance = render(
-      <InkUPlot opts={simpleOpts} data={simpleData} width={40} height={10} />,
+      <InkUPlot opts={simpleOpts} data={simpleData} width={40} height={10} format="symbols" />,
     );
     const frame = await waitForFrame(instance, f => !f.includes('Rendering chart...'));
     // Y-axis should have numeric labels
@@ -63,7 +63,7 @@ describe('InkUPlot component', () => {
 
   it('hides axes when showAxes={false}', async () => {
     const instance = render(
-      <InkUPlot opts={simpleOpts} data={simpleData} width={40} height={10} showAxes={false} />,
+      <InkUPlot opts={simpleOpts} data={simpleData} width={40} height={10} showAxes={false} format="symbols" />,
     );
     const frame = await waitForFrame(instance, f => !f.includes('Rendering chart...'));
     expect(frame.length).toBeGreaterThan(0);
@@ -84,7 +84,7 @@ describe('InkUPlot component', () => {
       ],
     };
     const instance = render(
-      <InkUPlot opts={opts} data={simpleData} width={60} height={12} />,
+      <InkUPlot opts={opts} data={simpleData} width={60} height={12} format="symbols" />,
     );
     const frame = await waitForFrame(instance, f => !f.includes('Rendering chart...'));
     // Frame should contain numeric labels (axis ticks)
@@ -106,7 +106,7 @@ describe('InkUPlot component', () => {
       [5, 15, 10, 20, 25],
     ];
     const instance = render(
-      <InkUPlot opts={opts} data={data} width={60} height={12} />,
+      <InkUPlot opts={opts} data={data} width={60} height={12} format="symbols" />,
     );
     const frame = await waitForFrame(instance, f => !f.includes('Rendering chart...'));
     expect(frame).toContain('T');
@@ -115,7 +115,7 @@ describe('InkUPlot component', () => {
 
   it('re-renders when data changes', async () => {
     const instance = render(
-      <InkUPlot opts={simpleOpts} data={simpleData} width={40} height={10} />,
+      <InkUPlot opts={simpleOpts} data={simpleData} width={40} height={10} format="symbols" />,
     );
     await waitForFrame(instance, f => !f.includes('Rendering chart...'));
 
@@ -124,7 +124,7 @@ describe('InkUPlot component', () => {
       [50, 60, 55, 65, 70],
     ];
     instance.rerender(
-      <InkUPlot opts={simpleOpts} data={newData} width={40} height={10} />,
+      <InkUPlot opts={simpleOpts} data={newData} width={40} height={10} format="symbols" />,
     );
 
     // Should eventually render new data (might briefly show loading)

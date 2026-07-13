@@ -37,9 +37,15 @@ function App({ exit }: { exit: () => void }) {
   const [size, setSize] = useState({ cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 });
 
   useEffect(() => {
-    const onResize = () => setSize({ cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 });
+    // Debounce resize to a single trailing update (~200ms after the last event) so a
+    // drag doesn't thrash layout — effectively "resize on release".
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+    const onResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => setSize({ cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 }), 200);
+    };
     stdout.on('resize', onResize);
-    return () => { stdout.off('resize', onResize); };
+    return () => { clearTimeout(resizeTimer); stdout.off('resize', onResize); };
   }, [stdout]);
 
   useInput((input, key) => {
