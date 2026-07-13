@@ -1,16 +1,35 @@
 # ink-uplot
 
-Render [uPlot](https://github.com/leeoniya/uPlot) charts in the terminal using [React Ink](https://github.com/vadimdemedes/ink). Reuse your existing browser uPlot configuration objects — series, axes, scales — and get high-fidelity terminal charts with truecolor support via [chafa-wasm](https://github.com/nicholasgasior/chafa-wasm).
+[![npm version](https://img.shields.io/npm/v/ink-uplot.svg)](https://www.npmjs.com/package/ink-uplot)
+[![npm downloads](https://img.shields.io/npm/dm/ink-uplot.svg)](https://www.npmjs.com/package/ink-uplot)
+[![license](https://img.shields.io/npm/l/ink-uplot.svg)](./LICENSE)
+[![types](https://img.shields.io/npm/types/ink-uplot.svg)](https://www.npmjs.com/package/ink-uplot)
+
+**Render [uPlot](https://github.com/leeoniya/uPlot) charts in the terminal** with [React Ink](https://github.com/vadimdemedes/ink). Reuse your existing browser uPlot config — series, axes, scales — and get pixel-accurate, truecolor terminal charts. Auto-detects the best output for your terminal: **Unicode block art**, or native **kitty / sixel / iTerm2 graphics protocols** for real inline images.
+
+A terminal charting / TUI dataviz library for Node.js — line charts, time series, live-updating dashboards, and trading-style plots, straight in your CLI.
 
 ![Timestamps chart — 90-day time series with date X-axis](assets/timestamps.png)
+
+## Why ink-uplot?
+
+- **Real uPlot config, not a new API** — paste the same `opts`/`data` you'd use in the browser. Series, scales, dual axes, custom tick formatters all work.
+- **Truecolor & graphics protocols** — beyond ASCII/Unicode: emit real images via the kitty, sixel, and iTerm2 inline-image protocols, auto-detected per terminal.
+- **Built for live data** — update the `data` prop to animate; designed for streaming, real-time dashboards.
+- **Composable** — it's a normal Ink `<Box>`/`<Text>` component; embed it in any TUI layout.
+- **TypeScript-first**, ESM, fully typed.
 
 ## Install
 
 ```bash
-pnpm add ink-uplot uplot canvas ink react
+npm install ink-uplot uplot ink react
 ```
 
-> **Note:** `canvas` ([node-canvas](https://github.com/Automattic/node-canvas)) requires system dependencies (Cairo, Pango). See [node-canvas installation](https://github.com/Automattic/node-canvas#compiling) for platform-specific instructions. On macOS: `brew install pkg-config cairo pango`.
+`uplot`, `ink`, and `react` are peer dependencies. `canvas` ([node-canvas](https://github.com/Automattic/node-canvas)) is pulled in automatically but needs system libraries (Cairo, Pango):
+
+- **macOS:** `brew install pkg-config cairo pango`
+- **Debian/Ubuntu:** `sudo apt-get install build-essential libcairo2-dev libpango1.0-dev`
+- See [node-canvas compiling](https://github.com/Automattic/node-canvas#compiling) for other platforms.
 
 ## Quick Start
 
@@ -31,7 +50,7 @@ const opts = {
 };
 
 const data = [
-  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],  // x values
+  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],           // x values
   [10, 25, 15, 30, 20, 35, 25, 40, 30, 45],  // y values
 ];
 
@@ -42,37 +61,43 @@ function App() {
 render(<App />);
 ```
 
-## How It Works
+## Terminal formats
 
-1. A minimal DOM shim provides fake `document`/`window` globals so uPlot can initialize in Node.js
-2. uPlot renders series data onto a [node-canvas](https://github.com/Automattic/node-canvas) instance
-3. The canvas pixel buffer is read via `getImageData()`
-4. [chafa-wasm](https://github.com/nicholasgasior/chafa-wasm) converts pixels to truecolor Unicode block art
-5. Text-based axes (Y-axis labels, X-axis ticks) are calculated separately and rendered as Ink `<Text>` components
-6. Output is composed via Ink `<Box>` / `<Text>` layout
+ink-uplot picks the highest-fidelity output your terminal supports and falls back gracefully. Detection is automatic (`detectFormat()`), or force one with the `format` prop.
+
+| Format | What it is | Terminals |
+|--------|-----------|-----------|
+| `symbols` | Truecolor Unicode block art (via [chafa](https://github.com/hectorm/chafa-wasm)) | **Any** terminal — universal fallback |
+| `kitty` | [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) | kitty, Ghostty, Konsole |
+| `sixels` | Sixel graphics | foot, Windows Terminal, xterm (+sixel) |
+| `iterm2` | iTerm2 inline images | iTerm2, WezTerm, VS Code |
+
+```tsx
+// Force a format instead of auto-detecting:
+<InkUPlot opts={opts} data={data} format="symbols" />
+```
 
 ## Props
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
-| `opts` | `uPlot.Options` | *required* | Standard uPlot options. Interactive options (cursor, select, legend) are automatically stripped. |
-| `data` | `uPlot.AlignedData` | *required* | uPlot data array — same format as browser uPlot. |
+| `opts` | `uPlot.Options` | *required* | Standard uPlot options. Interactive options (cursor, select, legend) are stripped automatically. |
+| `data` | `uPlot.AlignedData` | *required* | uPlot data array — identical to browser uPlot. |
 | `width` | `number` | `stdout.columns` or `80` | Chart width in terminal columns. |
 | `height` | `number` | `24` | Chart height in terminal rows. |
-| `threshold` | `number` | `128` | Luminance threshold (0-255) for pixel-to-dot conversion. Lower = more dots. |
-| `showAxes` | `boolean` | `true` | Show text axes around the chart. Set to `false` for a borderless chart. |
+| `format` | `'symbols' \| 'kitty' \| 'sixels' \| 'iterm2'` | auto-detected | Output format for the current terminal. |
+| `showAxes` | `boolean` | `true` | Render text axes around the chart. `false` for a borderless chart. |
 | `color` | `boolean` | `true` | Enable truecolor ANSI output. |
-| `background` | `'dark' \| 'light'` | `'dark'` | Terminal background. `'dark'` renders light-on-dark; `'light'` inverts. |
 
 ## Features
 
-- **Truecolor rendering** — chafa-wasm produces high-fidelity Unicode block art with 24-bit color
-- **Text axes** — Y-axis labels (left and/or right) and X-axis ticks are rendered as real text, not pixels
-- **Dual Y-axis** — put scales on left, right, or both using uPlot's `scale` and `side` axis config
-- **Timestamp auto-detection** — unix timestamp x-values are automatically formatted as dates
-- **Custom axis formatters** — set `values` on axes to control tick label formatting (e.g., `mm:ss`)
-- **Live data** — update `data` prop to animate; the component re-renders on prop changes
-- **Responsive** — listens to terminal resize when `width` is not fixed
+- **Truecolor rendering** — 24-bit color Unicode block art, or real inline images via graphics protocols.
+- **Text axes** — Y-axis labels (left and/or right) and X-axis ticks render as real, copy-pasteable text.
+- **Dual Y-axis** — put scales on the left, right, or both via uPlot's `scale` and `side` config.
+- **Timestamp auto-detection** — unix-timestamp X values are formatted as dates automatically.
+- **Custom axis formatters** — set `values` on an axis to control tick labels (e.g. `mm:ss`).
+- **Live / streaming data** — update the `data` prop to animate; resize-aware.
+- **Responsive** — follows terminal resize when `width` isn't fixed.
 
 ## Examples
 
@@ -87,48 +112,56 @@ Run any example with `npx tsx examples/<name>.tsx`. Press `q` to quit.
 | [`timestamps.tsx`](examples/timestamps.tsx) | 90-day time series with date X-axis |
 | [`live-trading.tsx`](examples/live-trading.tsx) | Streaming data at 100ms, mm:ss X-axis, highlighted last value |
 | [`no-axes.tsx`](examples/no-axes.tsx) | Minimal borderless chart (`showAxes={false}`) |
-| [`line-width-test.tsx`](examples/line-width-test.tsx) | Interactive line width comparison (arrow keys to adjust) |
+| [`line-width-test.tsx`](examples/line-width-test.tsx) | Interactive line-width comparison (arrow keys) |
 
 ![Shaded area chart](assets/shaded-area.png)
 
 ![Live trading chart](assets/live-trading.png)
 
-## Lower-Level API
+## How it works
 
-For custom pipelines, the internal functions are exported:
+1. A minimal DOM shim provides fake `document`/`window` globals so uPlot can initialize in Node.js.
+2. uPlot renders your series onto a [node-canvas](https://github.com/Automattic/node-canvas) instance.
+3. The canvas pixel buffer is extracted (`getImageData`, or a native PNG for iTerm2).
+4. For `symbols`/`kitty`/`sixels`, [chafa-wasm](https://github.com/hectorm/chafa-wasm) converts pixels to truecolor terminal output; for `iterm2` the PNG is sent inline.
+5. Text axes are computed separately (nice-numbers tick algorithm) and rendered as Ink `<Text>`.
+6. Everything is composed via Ink `<Box>`/`<Text>` layout.
+
+## Lower-level API
+
+For custom pipelines, the internals are exported:
 
 ```ts
-import { renderToImageData, pixelsToTerminal, pixelsToBraille, sampleCellColors } from 'ink-uplot';
+import {
+  renderToImageData,
+  renderToPNG,
+  pixelsToTerminal,
+  detectFormat,
+} from 'ink-uplot';
 
-// Render uPlot to a pixel buffer
+// uPlot → pixel buffer
 const imageData = await renderToImageData(opts, data, 640, 384);
 
-// Convert to truecolor terminal output via chafa
-const ansi = await pixelsToTerminal(imageData, {
-  width: 80,
-  height: 24,
-  colors: 'truecolor',
-});
+// pixels → terminal output (symbols / kitty / sixels)
+const ansi = await pixelsToTerminal(imageData, { width: 80, height: 24, colors: 'truecolor' });
 console.log(ansi);
 
-// Or convert to Braille (lower fidelity, no deps)
-const braille = pixelsToBraille(imageData, { threshold: 100 });
-console.log(braille.text);
+// uPlot → PNG buffer (used by the iTerm2 fast path)
+const png = await renderToPNG(opts, data, 640, 384);
 ```
 
 ## Tips
 
-- **Series colors:** Use high-contrast colors (`'cyan'`, `'#ff0000'`, `'#00ff88'`) for best visibility.
-- **Embedded charts:** The component only occupies its `width` x `height` in terminal cells. Wrap in an Ink `<Box>` to embed in larger layouts.
-- **Shaded areas:** Use `fill` on series with alpha >= 0.3 (e.g., `'rgba(0, 200, 255, 0.4)'`). Very low alpha values may not be visible.
-- **Performance:** Rendering is async. The component shows "Rendering chart..." until the first frame is ready.
-- **Axes:** Set `showAxes={false}` to hide text axes entirely, or configure individual axes via uPlot's axes config.
+- **Series colors:** high-contrast colors (`'cyan'`, `'#ff0000'`, `'#00ff88'`) read best.
+- **Embedding:** the component occupies exactly its `width` × `height` in cells — wrap it in an Ink `<Box>` to place it in a larger layout.
+- **Shaded areas:** use `fill` with alpha ≥ 0.3 (e.g. `'rgba(0, 200, 255, 0.4)'`); very low alpha may not be visible.
+- **Formats:** if a terminal misdetects, pass `format` explicitly. `symbols` works everywhere.
 
 ## Requirements
 
 - Node.js >= 18
-- System dependencies for [node-canvas](https://github.com/Automattic/node-canvas#compiling)
+- System libraries for [node-canvas](https://github.com/Automattic/node-canvas#compiling) (Cairo, Pango)
 
 ## License
 
-ISC
+[MIT](./LICENSE)
