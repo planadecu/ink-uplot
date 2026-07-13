@@ -23,11 +23,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          # registry-url is required so npm knows the registry for the OIDC exchange.
+          # npm CLI (>= 11.5.1) detects the OIDC environment and authenticates with it
+          # BEFORE falling back to the setup-node placeholder token, so no NODE_AUTH_TOKEN
+          # is set on the publish step. (pnpm publish does NOT do this — it uses the
+          # placeholder and 404s — which is why we publish with npm below.)
+          registry-url: 'https://registry.npmjs.org'
           cache: 'pnpm'
-          # NOTE: intentionally no `registry-url`. It writes an .npmrc with
-          # `_authToken=${NODE_AUTH_TOKEN}` and a placeholder token, which shadows OIDC
-          # trusted publishing (the placeholder is used instead → E404). Leaving it out
-          # lets npm publish authenticate via the OIDC id-token exchange.
       - name: Configure Git
         run: |
           git config --global user.name 'GitHub Actions'
