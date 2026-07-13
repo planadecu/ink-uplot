@@ -43,10 +43,16 @@ jobs:
           git add package.json pnpm-lock.yaml
           git commit -m "Bump version [skip ci]"
           git push
-      # Publish via npm Trusted Publishing (OIDC). No token needed: npm exchanges the
-      # GitHub id-token (permissions.id-token: write) for a short-lived publish credential
-      # and attaches provenance automatically. Requires a Trusted Publisher configured for
-      # this package on npmjs.com (repo + this workflow filename). npm >= 11.5.1 is required
-      # for OIDC trusted publishing, so upgrade the bundled npm first.
+      # setup-node's registry-url writes an .npmrc with `always-auth=true` and a placeholder
+      # `_authToken`, which forces npm to send the fake token instead of doing the OIDC
+      # exchange (→ E404). Overwrite it with just the registry so npm has no token and must
+      # authenticate via OIDC trusted publishing.
+      - name: Clean npmrc so npm uses OIDC (not the placeholder token)
+        run: printf 'registry=https://registry.npmjs.org/\n' > "$NPM_CONFIG_USERCONFIG"
+      # Publish via npm Trusted Publishing (OIDC). npm >= 11.5.1 exchanges the GitHub
+      # id-token (permissions.id-token: write) for a short-lived publish credential and
+      # attaches provenance. Requires a Trusted Publisher configured for this package on
+      # npmjs.com (repo planadecu/ink-uplot + workflow file publish.yml).
       - run: npm install -g npm@latest
+      - run: npm --version
       - run: npm publish
