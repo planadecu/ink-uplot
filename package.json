@@ -1,6 +1,6 @@
 {
   "name": "ink-uplot",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Render uPlot charts in the terminal with React Ink — truecolor Unicode block art plus native kitty, sixel, and iTerm2 graphics protocols. Line charts, time series, and live dashboards for the CLI.",
   "type": "module",
   "main": "dist/index.js",
