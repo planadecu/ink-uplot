@@ -38,6 +38,8 @@ jobs:
           git add package.json pnpm-lock.yaml
           git commit -m "Bump version [skip ci]"
           git push
+      # Publish via npm Trusted Publishing (OIDC). No token needed: pnpm exchanges the
+      # GitHub id-token (permissions.id-token: write above) for a short-lived publish
+      # credential and attaches provenance automatically. Requires a Trusted Publisher
+      # to be configured for this package on npmjs.com (repo + this workflow filename).
       - run: pnpm publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
