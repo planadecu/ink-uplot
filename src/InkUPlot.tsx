@@ -29,10 +29,9 @@ export function InkUPlot({
   const liveCols = width ?? process.stdout.columns ?? 80;
   const liveRows = height;
 
-  // Freeze the whole layout during a resize drag. Repainting the reserved Ink box while
-  // the terminal reflows — and retransmitting images out-of-band — wedges some terminals
-  // (VSCode freezes hard). We hold the last committed size steady through the drag, then
-  // commit the new size and redraw once it settles (~150ms after the last resize event).
+  // Freeze the layout during a resize drag — repainting the reserved box and retransmitting
+  // images while the terminal reflows can wedge it. Hold the committed size steady through
+  // the drag, then commit the new size and redraw once it settles.
   const resizingRef = useRef(false);
   const [resizeTick, setResizeTick] = useState(0);
   const [committed, setCommitted] = useState({ cols: liveCols, rows: liveRows });
@@ -111,8 +110,7 @@ export function InkUPlot({
     // Serialize through renderLock — renderToImageData is not reentrant
     renderLock = renderLock.then(async () => {
       if (cancelled) return;
-      // Don't transmit images while a resize is in flight — it can freeze the terminal.
-      // The trailing resizeTick render redraws cleanly once the size settles.
+      // Skip image writes mid-resize; the trailing resizeTick render redraws after settle.
       if (resizingRef.current && isRawFormat(format)) return;
       try {
         let ansi: string;
@@ -133,8 +131,7 @@ export function InkUPlot({
           });
         }
         if (cancelled) return;
-        // Re-check after the (slow) render: a resize may have started while this frame
-        // was rendering. Writing its image now would land mid-reflow and freeze the terminal.
+        // Re-check: a resize may have started while this frame was rendering.
         if (resizingRef.current && isRawFormat(format)) return;
 
         if (isKitty(format)) {

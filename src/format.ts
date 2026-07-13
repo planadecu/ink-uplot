@@ -27,10 +27,7 @@ export function detectFormat(): RenderFormat {
   if (termProgram === 'iTerm.app') return 'iterm2';
   if (termProgram === 'WezTerm') return 'iterm2';
   if (termProgram === 'ghostty') return 'kitty';
-  // VSCode's xterm.js renders a one-shot kitty image, but the component's out-of-band
-  // kitty writes (absolute cursor + graphics-plane placement + delete-by-id) don't
-  // display through it. Its iTerm2 inline-image support flows with Ink and renders
-  // perfectly — verified empirically — so route VSCode to iterm2.
+  // VSCode renders iTerm2 inline images but not our out-of-band kitty writes.
   if (termProgram === 'vscode') return 'iterm2';
 
   // 3. Check terminal-specific env vars
