@@ -117,11 +117,11 @@ export function InkUPlot({
 
         if (format === 'iterm2') {
           // Fast path: node-canvas encodes PNG natively (C), skip chafa WASM entirely.
-          const png = await renderToPNG(opts, data, canvasWidth, canvasHeight, format);
+          const png = await renderToPNG(opts, data, canvasWidth, canvasHeight, format, showAxes);
           if (cancelled) return;
           ansi = iterm2Escape(png, chartCols, chartRows);
         } else {
-          const imageData = await renderToImageData(opts, data, canvasWidth, canvasHeight, format);
+          const imageData = await renderToImageData(opts, data, canvasWidth, canvasHeight, format, showAxes);
           if (cancelled) return;
           ansi = await pixelsToTerminal(imageData, {
             width: chartCols,

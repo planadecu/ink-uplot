@@ -10,6 +10,7 @@ function sanitizeOpts(
   width: number,
   height: number,
   format: RenderFormat,
+  showAxes: boolean,
 ): uPlotType.Options {
   const base: uPlotType.Options = {
     ...opts,
@@ -22,8 +23,10 @@ function sanitizeOpts(
   };
 
   if (format === 'symbols') {
-    // Braille mode: hide axes (rendered as text by the component), thin lines.
-    base.axes = (opts.axes ?? []).map(a => ({
+    // Braille mode: hide canvas axes (rendered as text by the component), thin lines.
+    // Default to [x, y] so an undefined/empty axes array still hides uPlot's implicit axes
+    // (uPlot draws default axes when given []).
+    base.axes = (opts.axes?.length ? opts.axes : [{}, {}]).map(a => ({
       ...a,
       show: false,
       grid: { ...a?.grid, show: false },
@@ -34,22 +37,58 @@ function sanitizeOpts(
       if (i === 0) return s;
       return { ...s, width: Math.max((s as any).width ?? 1, 3) };
     });
-  } else {
-    // Pixel-perfect mode (kitty/sixels/iterm2): keep uPlot's canvas axes.
-    base.axes = (opts.axes ?? []).map(a => ({
-      ...a,
-      stroke: a?.stroke ?? '#888',
-      grid: { show: true, stroke: '#333', ...a?.grid },
-      ticks: { show: true, stroke: '#555', ...a?.ticks },
-      font: `${Math.max(10, Math.round(height / 40))}px sans-serif`,
-    }));
 
-    base.series = (opts.series ?? []).map((s, i) => {
-      if (i === 0) return s;
-      const w = (s as any).width ?? 2;
-      return { ...s, width: w * 3 };
+    return base;
+  }
+
+  // Pixel-perfect mode (kitty/sixels/iterm2): uPlot draws the axes on the canvas.
+  if (!showAxes) {
+    // Borderless chart — hide axes, grid, and ticks entirely.
+    // Default to [x, y] so an undefined/empty axes array still hides uPlot's implicit axes
+    // (uPlot draws default axes when given []).
+    base.axes = (opts.axes?.length ? opts.axes : [{}, {}]).map(a => ({
+      ...a,
+      show: false,
+      grid: { ...a?.grid, show: false },
+      ticks: { ...a?.ticks, show: false },
+    }));
+  } else {
+    const fontPx = Math.max(10, Math.round(height / 40));
+    const fontStr = `${fontPx}px sans-serif`;
+
+    // Auto-size vertical (y) axes to their widest label. uPlot's default ~50px width
+    // clips large labels (e.g. "13,000") at the canvas edge, especially at bigger fonts.
+    const autoSizeY = (self: any, values: string[] | null, axisIdx: number, cycleNum: number): number => {
+      const axis = self.axes[axisIdx];
+      if (cycleNum > 1 && axis._size != null) return axis._size;
+      self.ctx.font = fontStr;
+      let maxW = 0;
+      for (const v of values ?? []) {
+        const w = self.ctx.measureText(String(v)).width;
+        if (w > maxW) maxW = w;
+      }
+      return Math.ceil(maxW) + 20; // label + tick + gap
+    };
+
+    base.axes = (opts.axes ?? []).map((a, i) => {
+      // side 1/3 are vertical; an undefined-side axis after index 0 defaults to a left y-axis.
+      const isY = a?.side === 1 || a?.side === 3 || (i > 0 && a?.side == null);
+      return {
+        ...a,
+        stroke: a?.stroke ?? '#888',
+        grid: { show: true, stroke: '#333', ...a?.grid },
+        ticks: { show: true, stroke: '#555', ...a?.ticks },
+        font: fontStr,
+        ...(isY && (a as any)?.size == null ? { size: autoSizeY } : {}),
+      };
     });
   }
+
+  base.series = (opts.series ?? []).map((s, i) => {
+    if (i === 0) return s;
+    const w = (s as any).width ?? 2;
+    return { ...s, width: w * 3 };
+  });
 
   return base;
 }
@@ -69,6 +108,7 @@ async function renderChart(
   canvasWidth: number,
   canvasHeight: number,
   format: RenderFormat,
+  showAxes: boolean,
 ) {
   const shim = installDOMShim(canvasWidth, canvasHeight);
 
@@ -85,7 +125,7 @@ async function renderChart(
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
     }
 
-    const sanitized = sanitizeOpts(opts, canvasWidth, canvasHeight, format);
+    const sanitized = sanitizeOpts(opts, canvasWidth, canvasHeight, format, showAxes);
 
     const chart = new uPlotCtor(sanitized, data, (self, init) => {
       init();
@@ -106,8 +146,9 @@ export async function renderToImageData(
   canvasWidth: number,
   canvasHeight: number,
   format: RenderFormat = 'symbols',
+  showAxes = true,
 ): Promise<{ data: Uint8ClampedArray; width: number; height: number }> {
-  const { canvas, chart } = await renderChart(opts, data, canvasWidth, canvasHeight, format);
+  const { canvas, chart } = await renderChart(opts, data, canvasWidth, canvasHeight, format, showAxes);
 
   try {
     const ctx = canvas.getContext('2d');
@@ -134,8 +175,9 @@ export async function renderToPNG(
   canvasWidth: number,
   canvasHeight: number,
   format: RenderFormat = 'iterm2',
+  showAxes = true,
 ): Promise<Buffer> {
-  const { canvas, chart } = await renderChart(opts, data, canvasWidth, canvasHeight, format);
+  const { canvas, chart } = await renderChart(opts, data, canvasWidth, canvasHeight, format, showAxes);
 
   try {
     const png = canvas.toBuffer('image/png');
