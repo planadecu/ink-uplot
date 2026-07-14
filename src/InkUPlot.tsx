@@ -127,6 +127,19 @@ export function InkUPlot({
   // Reserved box for out-of-band graphics — we read its on-screen position to place the image.
   const boxRef = useRef<DOMElement>(null);
 
+  // On unmount (e.g. the host app switches to a table or log view), erase the image.
+  // Kitty/ghostty images live in a separate graphics plane that text repaints never
+  // clear — and the double-buffer below only deletes the previous image on the *next*
+  // render, which never comes once the chart is gone. Without this the last chart
+  // lingers on screen over whatever replaces it. Both buffer IDs are deleted to be safe.
+  useEffect(() => {
+    return () => {
+      if (isKitty(format)) {
+        process.stdout.write(kittyDelete(1) + kittyDelete(2));
+      }
+    };
+  }, [format]);
+
   // Clear stale output when dimensions change (not needed for kitty — bypasses Ink)
   useEffect(() => {
     if (!isRawFormat(format)) { setOutput(null); setError(null); }
