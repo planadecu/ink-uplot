@@ -9,7 +9,8 @@
 
 A terminal charting / TUI dataviz library for Node.js — line charts, time series, live-updating dashboards, and trading-style plots, straight in your CLI.
 
-![Dual Y-axis chart — price on the left scale, volume on the right, rendered with truecolor terminal graphics](assets/dual-y-axis.png)
+<img src="assets/dual-y-axis.png" alt="Dual Y-axis chart — price on the left scale, volume on the right, rendered with truecolor terminal graphics" width="720">
+
 
 ## Why ink-uplot?
 
@@ -114,9 +115,9 @@ Run any example with `npx tsx examples/<name>.tsx`. Press `q` to quit.
 | [`no-axes.tsx`](examples/no-axes.tsx) | Minimal borderless chart (`showAxes={false}`) |
 | [`line-width-test.tsx`](examples/line-width-test.tsx) | Interactive line-width comparison (arrow keys) |
 
-![Shaded area chart](assets/shaded-area.png)
+<img src="assets/shaded-area.png" alt="Shaded area chart" width="620">
 
-![Live trading chart](assets/live-trading.png)
+<img src="assets/live-trading.png" alt="Live trading chart" width="620">
 
 ## How it works
 
