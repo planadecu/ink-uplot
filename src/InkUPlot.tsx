@@ -126,19 +126,48 @@ export function InkUPlot({
   const kittyIdRef = useRef(1);
   // Reserved box for out-of-band graphics — we read its on-screen position to place the image.
   const boxRef = useRef<DOMElement>(null);
+  // Last inline image (iterm2/sixels) + where it was stamped, in 1-based cells.
+  // Drives the redraw interval (survive Ink repaints) and the unmount clear.
+  const inlineStampRef = useRef<{ ansi: string; row: number; col: number; rows: number; cols: number } | null>(null);
+
+  // Real iTerm2/sixels erase inline images on Ink repaints; VS Code instead persists them
+  // (its images would stack if re-stamped). So only the former needs the redraw interval.
+  const inlineErasable = isRawFormat(format) && !isKitty(format) && process.env['TERM_PROGRAM'] !== 'vscode';
 
   // On unmount (e.g. the host app switches to a table or log view), erase the image.
-  // Kitty/ghostty images live in a separate graphics plane that text repaints never
-  // clear — and the double-buffer below only deletes the previous image on the *next*
-  // render, which never comes once the chart is gone. Without this the last chart
-  // lingers on screen over whatever replaces it. Both buffer IDs are deleted to be safe.
+  // Kitty/ghostty images live in a separate graphics plane that text repaints never clear;
+  // the double-buffer only deletes the previous image on the *next* render, which never
+  // comes once the chart is gone — so delete both buffer IDs. Inline images (iterm2/vscode)
+  // have no delete command and VS Code persists them over later text, so paint the exact
+  // cells black; the host's next repaint then draws the replacement view over the black.
   useEffect(() => {
     return () => {
       if (isKitty(format)) {
         process.stdout.write(kittyDelete(1) + kittyDelete(2));
+      } else if (isRawFormat(format)) {
+        const s = inlineStampRef.current;
+        if (s) {
+          const blank = `\x1b[40m${' '.repeat(s.cols)}\x1b[0m`;
+          let out = '';
+          for (let r = 0; r < s.rows; r++) out += `\x1b[${s.row + r};${s.col}H${blank}`;
+          process.stdout.write(out);
+        }
       }
     };
   }, [format]);
+
+  // Inline images (real iTerm2/sixels) sit in the text grid, so the host app's normal Ink
+  // repaints (e.g. a live price ticker) erase them — and this component doesn't re-render
+  // on those, so nothing redraws it. Re-stamp the cached image on a short interval so it
+  // survives. Some flicker is expected: unlike kitty there's no double-buffer to swap.
+  useEffect(() => {
+    if (!inlineErasable) return;
+    const id = setInterval(() => {
+      const s = inlineStampRef.current;
+      if (s) process.stdout.write(`\x1b[${s.row};${s.col}H${s.ansi}`);
+    }, 120);
+    return () => clearInterval(id);
+  }, [inlineErasable]);
 
   // Clear stale output when dimensions change (not needed for kitty — bypasses Ink)
   useEffect(() => {
@@ -191,10 +220,12 @@ export function InkUPlot({
           const row = (geom?.row ?? 0) + 1; // 1-based row within the (top-anchored) frame
           process.stdout.write(`\x1b[${row};${col}H${tagged}${kittyDelete(oldId)}`);
         } else if (isRawFormat(format)) {
-          // Inline images (iterm2/sixels) occupy character cells. Ink leaves the cursor at
-          // the frame bottom, so move up to the box's top row, then across to its column.
-          const up = geom ? Math.max(0, geom.frameHeight - geom.row) : chartRows;
-          process.stdout.write(`\x1b[${up}A\x1b[${col}G${ansi}`);
+          // Inline images (iterm2/sixels) occupy character cells. Position absolutely at the
+          // box's top-left (like kitty) so the same coords drive the redraw interval and the
+          // unmount clear. Cache the stamp for both.
+          const row = (geom?.row ?? 0) + 1;
+          process.stdout.write(`\x1b[${row};${col}H${ansi}`);
+          inlineStampRef.current = { ansi, row, col, rows: chartRows, cols: chartCols };
         } else {
           setOutput(ansi);
         }
