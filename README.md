@@ -158,6 +158,12 @@ const png = await renderToPNG(opts, data, 640, 384);
 - **Shaded areas:** use `fill` with alpha ≥ 0.3 (e.g. `'rgba(0, 200, 255, 0.4)'`); very low alpha may not be visible.
 - **Formats:** if a terminal misdetects, pass `format` explicitly. `symbols` works everywhere.
 
+## Used by
+
+- [glassnode-terminal](https://www.npmjs.com/package/glassnode-terminal) — an interactive terminal UI for exploring Glassnode on-chain & market crypto data: a three-pane explorer with live charts and price tickers.
+
+Using ink-uplot in your project? Open a PR to add it here.
+
 ## Requirements
 
 - Node.js >= 18
