@@ -16,7 +16,7 @@ ink-uplot renders uPlot charts in the terminal via React Ink. It reuses standard
 ## Commands
 
 ```bash
-pnpm test          # Run all tests (53 tests, ~1.3s)
+pnpm test          # Run all tests (79 tests, ~1.3s)
 pnpm run build     # Build to dist/ (ESM + DTS)
 npx tsc --noEmit   # Type-check without emitting
 npx tsx examples/basic-line.tsx  # Run example
@@ -30,22 +30,25 @@ symbols mode:
                                                                            ↓
                                                                 text axes (axes.ts) → [Ink <Text>]
 
-raw mode (kitty/sixels/iterm2):
+raw mode — kitty/sixels:
   opts + data → [DOM shim] → [uPlot on node-canvas + axes] → [getImageData] → [chafa-wasm] → stdout
-                                                                                  (Ink renders placeholder lines only)
+raw mode — iterm2 (fast path):
+  opts + data → [DOM shim] → [uPlot on node-canvas + axes] → [canvas.toBuffer PNG] → iterm2 escape → stdout
+                                                             (Ink renders an empty reserved <Box>; image written out-of-band)
 ```
 
 ### Source Files
 
 | File | Responsibility |
 |------|---------------|
-| `src/dom-shim.ts` | Fake DOM globals (document, window, navigator) for uPlot. Persistent singleton document — uPlot caches `doc` at import time. |
-| `src/renderer.ts` | Orchestrates shim + dynamic uPlot import + canvas extraction. Returns ImageData. Handles braille vs pixel rendering modes. |
-| `src/chafa.ts` | Wrapper around chafa-wasm. Converts pixel buffer to truecolor Unicode block art (symbols, sixels, kitty, iterm2). |
-| `src/axes.ts` | Nice-numbers tick calculation (Heckbert 1990), tick positioning, timestamp auto-detection and formatting. |
+| `src/dom-shim.ts` | Fake DOM globals (document, window, navigator) for uPlot. Persistent singleton document — uPlot caches `doc` at import time. Caches/reuses Cairo canvas surfaces across renders (per-frame allocation leaked native memory at high fps). |
+| `src/renderer.ts` | Orchestrates shim + dynamic uPlot import. `renderToImageData` (pixel buffer, for symbols/kitty/sixels via chafa) and `renderToPNG` (native node-canvas PNG, the iterm2 fast path). `sanitizeOpts` hides/styles/auto-sizes axes per format and `showAxes`. |
+| `src/format.ts` | Terminal format detection (`detectFormat`) and escape-sequence helpers: `isRawFormat`/`isKitty`, kitty image tag/delete, `iterm2Escape`. |
+| `src/chafa.ts` | Wrapper around chafa-wasm. Converts pixel buffer to truecolor Unicode block art (symbols, sixels, kitty). Recreates the module periodically to bound a WASM heap leak (see decision 12). |
+| `src/axes.ts` | Nice-numbers tick calculation (Heckbert 1990), tick positioning, timestamp auto-detection/formatting, and text-axis layout (`computeScales`/`buildYLabels`/`buildXLabelLine`) for symbols mode. |
 | `src/braille.ts` | Pure function: pixel buffer → Unicode Braille string. 2x4 dot grid per character cell. Legacy/alternative renderer. |
 | `src/color-sampler.ts` | Per-cell dominant color extraction → ANSI color name. Used with braille renderer. |
-| `src/InkUPlot.tsx` | React Ink component. Auto-detects terminal format via `detectFormat()`. Symbols mode: renders chart via chafa-wasm with text axes. Raw mode (kitty/sixels/iterm2): writes image directly to stdout, Ink renders placeholder lines. |
+| `src/InkUPlot.tsx` | React Ink component. Auto-detects format via `detectFormat()`. Symbols mode: chafa block art + text axes as `<Text>`. Raw mode (kitty/sixels/iterm2): reserves an empty `<Box>` and writes the image out-of-band to stdout, positioned inside that box via the box's on-screen geometry. Handles resize (freeze + pause) and clears the image on unmount. |
 | `src/types.ts` | Shared TypeScript interfaces (InkUPlotProps, BrailleOptions, etc.). |
 | `src/index.ts` | Public API exports. |
 
@@ -67,13 +70,17 @@ raw mode (kitty/sixels/iterm2):
 
 8. **Canvas dimension cap** — `MAX_DIM = 4096` and `MAX_PIXELS = 2M` prevent chafa-wasm WASM heap OOB access on large terminals.
 
-9. **Terminal format auto-detection** — `detectFormat()` checks env vars in priority order: `TERM` (most reliable, propagates through SSH) → `TERM_PROGRAM` → terminal-specific vars (`KITTY_WINDOW_ID`, `ITERM_SESSION_ID`, etc.) → fallback to 'symbols'. Result is cached at module level.
+9. **Terminal format auto-detection** — `detectFormat()` (in `format.ts`) checks env vars in priority order: `TERM` (most reliable, propagates through SSH) → `TERM_PROGRAM` → terminal-specific vars (`KITTY_WINDOW_ID`, `ITERM_SESSION_ID`, etc.) → fallback to 'symbols'. Result is cached at module level. Note **VSCode → `iterm2`** (not kitty): VSCode's terminal renders iTerm2 inline images but not our out-of-band kitty writes.
 
-10. **Raw format rendering** — Kitty/sixels/iterm2 images bypass Ink's text rendering entirely. The image is written directly to `process.stdout.write()` with absolute cursor positioning (`\x1b[1;1H`). Ink only renders invisible placeholder lines to reserve vertical space. `setOutput()` is NOT called in raw mode — Ink re-renders write spaces that erase kitty images.
+10. **Raw format rendering** — Kitty/sixels/iterm2 images bypass Ink's text rendering entirely. The component reserves an empty `<Box>` (via `boxRef`) and writes the image directly to `process.stdout.write()`, positioned *inside* that box by reading its on-screen geometry from Ink's Yoga layout (`boxScreenGeom` sums computed offsets up the node tree) — so a chart can be embedded in a larger TUI layout, not just the top-left. Kitty uses absolute positioning + double-buffered image IDs (place new, delete old); iterm2/sixels move relative to the cursor Ink leaves. `setOutput()` is NOT called in raw mode (Ink re-renders would erase the image). On unmount, the image is cleared so it doesn't linger after exit.
 
 11. **Render serialization** — `renderToImageData` uses global DOM state and is not reentrant. A module-level `renderLock` promise chain serializes all async render calls.
 
 12. **chafa-wasm leak workaround** — chafa-wasm 0.3.3 leaks ~1.7MB of WASM heap per `imageToAnsi` call (leak is in its compiled C; Emscripten never shrinks the heap). At 10fps this exhausts native memory and aborts the process (Cairo/GLib OOM) within ~1 min. `getChafa()` drops and recreates the module every `RECREATE_EVERY_CALLS` (60) calls so GC reclaims the leaked ArrayBuffer — reinit is ~5-8ms (compiled module is cached), bounding peak memory to a few hundred MB. Only affects chafa formats (symbols/kitty/sixels); iterm2 uses `renderToPNG` and is unaffected.
+
+13. **Resize handling** — Transmitting a large out-of-band image while a terminal reflows can wedge it. During a resize the component *freezes* layout to a `committed` size and *pauses* image writes (guarded by `resizingRef`, checked before and after the slow render), redrawing once ~250ms after the last resize event. Examples also debounce their own `stdout` resize handler ("resize on release"). Fixes freezes on kitty/ghostty; VSCode still wedges reflowing the displayed image (see Known Limitations).
+
+14. **Raw-format render quality** — Canvas is rendered at **2x cell density** (`chartCols*16 × chartRows*32`, capped by `MAX_DIM`/`MAX_PIXELS`) so charts stay crisp when the terminal upscales the image. For pixel-perfect formats, uPlot's canvas axes are kept and **vertical axes auto-size** to their widest label (uPlot's default width clips large labels like `13,000`). `showAxes={false}` hides axes/grid/ticks (defaulting to `[x, y]` since uPlot draws implicit axes for an empty array).
 
 ## Examples
 
@@ -96,9 +103,10 @@ Tests are in `test/`. Each source module has a corresponding test file:
 
 - `test/braille.test.ts` — 10 tests for Braille encoding correctness (dot positions, threshold, invert)
 - `test/dom-shim.test.ts` — 7 tests for DOM shim globals and stub elements
-- `test/renderer.test.ts` — 3 tests for uPlot rendering (no crash, pixels present, dimensions)
+- `test/renderer.test.ts` — 4 tests for uPlot rendering (`renderToImageData` + `renderToPNG`)
 - `test/color-sampler.test.ts` — 9 tests for RGB → ANSI color mapping
-- `test/axes.test.ts` — 13 tests for tick calculation, positioning, timestamp detection/formatting
+- `test/axes.test.ts` — 21 tests for tick calc, positioning, timestamp detect/format, and scale/label layout (`computeScales`/`buildYLabels`/`buildXLabelLine`)
+- `test/format.test.ts` — 17 tests for format detection (env matrix) and kitty/iterm2 escape helpers
 - `test/chafa.test.ts` — 3 tests for chafa-wasm pixel-to-terminal conversion
 - `test/component.test.tsx` — 7 tests for InkUPlot React component (uses ink-testing-library)
 - `test/integration.test.ts` — 1 full pipeline test (opts → braille string)
@@ -109,6 +117,10 @@ Tests are in `test/`. Each source module has a corresponding test file:
 - No default exports — named exports only
 - `any` types allowed in dom-shim.ts (necessary for DOM stub interfaces)
 - Vitest globals enabled (`describe`, `it`, `expect` without imports)
+
+## Releases
+
+Pushing to `main` triggers `.github/workflows/publish.yml`: build → test → patch-bump (`[skip ci]` commit) → `npm publish` via **OIDC trusted publishing** (no token; provenance attached, npm ≥ 11.5.1). A Trusted Publisher for `planadecu/ink-uplot` + `publish.yml` must exist on npmjs.com. `.npmrc` hardens installs (`onlyBuiltDependencies`, `minimum-release-age`); do NOT set `ignore-scripts` — it blocks canvas's native build.
 
 ## Known Limitations
 
