@@ -10,6 +10,7 @@ const cos = x.map(t => Math.cos(t / 8) * 30 + 50);
 const saw = x.map(t => ((t % 40) / 40) * 80 + 10);
 
 const opts = {
+  scales: { x: { time: false } },
   series: [
     {},
     { stroke: 'cyan', label: 'Sin', width: 2 },
@@ -17,8 +18,8 @@ const opts = {
     { stroke: '#aa44ff', label: 'Saw', width: 2 },
   ],
   axes: [
-    { stroke: '#555', grid: { stroke: '#222' } },
-    { stroke: '#555', grid: { stroke: '#222' } },
+    { stroke: '#999', grid: { stroke: '#222' } },
+    { stroke: '#999', grid: { stroke: '#222' } },
   ],
 };
 

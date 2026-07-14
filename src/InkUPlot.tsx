@@ -83,11 +83,13 @@ export function InkUPlot({
   const chartCols = rawMode ? termCols : Math.max(1, termCols - leftLabelWidth - rightLabelWidth);
   const chartRows = rawMode ? effHeight : Math.max(1, showAxes ? effHeight - 2 : effHeight);
 
-  // Cap canvas pixel dimensions to avoid WASM memory issues.
+  // Render at 2x cell density (supersample) so the chart stays crisp when the terminal
+  // upscales the image — at 1x it looks blurry on small/hi-DPI terminals. Display size is
+  // unchanged; only the pixel resolution goes up. Capped to avoid WASM memory issues.
   const MAX_DIM = 4096;
   const MAX_PIXELS = 2_000_000;
-  let canvasWidth = Math.min(chartCols * 8, MAX_DIM);
-  let canvasHeight = Math.min(chartRows * 16, MAX_DIM);
+  let canvasWidth = Math.min(chartCols * 16, MAX_DIM);
+  let canvasHeight = Math.min(chartRows * 32, MAX_DIM);
   if (canvasWidth * canvasHeight > MAX_PIXELS) {
     const scale = Math.sqrt(MAX_PIXELS / (canvasWidth * canvasHeight));
     canvasWidth = Math.floor(canvasWidth * scale);
@@ -160,7 +162,7 @@ export function InkUPlot({
     });
 
     return () => { cancelled = true; };
-  }, [opts, data, canvasWidth, canvasHeight, chartCols, chartRows, format, color, resizeTick]);
+  }, [opts, data, canvasWidth, canvasHeight, chartCols, chartRows, format, color, showAxes, resizeTick]);
 
   if (error) {
     return <Text color="red">Error rendering chart: {error}</Text>;

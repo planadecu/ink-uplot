@@ -70,14 +70,16 @@ function sanitizeOpts(
       return Math.ceil(maxW) + 20; // label + tick + gap
     };
 
-    base.axes = (opts.axes ?? []).map((a, i) => {
+    // Default to [x, y] so implicit axes (undefined/empty array — uPlot draws them anyway)
+    // still get styling and auto-sizing, not uPlot's tiny unstyled defaults.
+    base.axes = (opts.axes?.length ? opts.axes : [{}, {}]).map((a, i) => {
       // side 1/3 are vertical; an undefined-side axis after index 0 defaults to a left y-axis.
       const isY = a?.side === 1 || a?.side === 3 || (i > 0 && a?.side == null);
       return {
         ...a,
-        stroke: a?.stroke ?? '#888',
+        stroke: a?.stroke ?? '#aaa',
         grid: { show: true, stroke: '#333', ...a?.grid },
-        ticks: { show: true, stroke: '#555', ...a?.ticks },
+        ticks: { show: true, stroke: '#666', ...a?.ticks },
         font: fontStr,
         ...(isY && (a as any)?.size == null ? { size: autoSizeY } : {}),
       };

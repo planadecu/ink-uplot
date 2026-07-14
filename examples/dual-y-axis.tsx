@@ -22,7 +22,7 @@ const opts = {
     { stroke: '#ffaa00', label: 'Volume', width: 1, scale: 'volume' },
   ],
   axes: [
-    { stroke: '#555', grid: { stroke: '#222' } },
+    { stroke: '#999', grid: { stroke: '#222' } },
     { stroke: '#00ccff', grid: { stroke: '#222' }, scale: 'y' },
     { stroke: '#ffaa00', grid: { show: false }, scale: 'volume', side: 1 },
   ],

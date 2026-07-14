@@ -9,6 +9,7 @@ const y1 = x.map(t => Math.sin(t / 12) * 30 + 60);
 const y2 = x.map(t => Math.cos(t / 15) * 20 + 30);
 
 const opts = {
+  scales: { x: { time: false } },
   series: [
     {},
     {
@@ -25,8 +26,8 @@ const opts = {
     },
   ],
   axes: [
-    { stroke: '#555', grid: { stroke: '#222' } },
-    { stroke: '#555', grid: { stroke: '#222' } },
+    { stroke: '#999', grid: { stroke: '#222' } },
+    { stroke: '#999', grid: { stroke: '#222' } },
   ],
 };
 
