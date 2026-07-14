@@ -9,7 +9,7 @@
 
 A terminal charting / TUI dataviz library for Node.js — line charts, time series, live-updating dashboards, and trading-style plots, straight in your CLI.
 
-![Timestamps chart — 90-day time series with date X-axis](assets/timestamps.png)
+![Dual Y-axis chart — price on the left scale, volume on the right, rendered with truecolor terminal graphics](assets/dual-y-axis.png)
 
 ## Why ink-uplot?
 
