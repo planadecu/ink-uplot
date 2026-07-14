@@ -7,13 +7,14 @@ const timestamps = Array.from({ length: count }, (_, i) => i);
 const values = timestamps.map(t => Math.sin(t / 5) * 40 + 50);
 
 const opts = {
+  scales: { x: { time: false } },
   series: [
     {},
     { stroke: 'cyan', label: 'Value', width: 2 },
   ],
   axes: [
-    { stroke: '#555', grid: { stroke: '#333' } },
-    { stroke: '#555', grid: { stroke: '#333' } },
+    { stroke: '#999', grid: { stroke: '#333' } },
+    { stroke: '#999', grid: { stroke: '#333' } },
   ],
 };
 

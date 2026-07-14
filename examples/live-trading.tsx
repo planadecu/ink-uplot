@@ -95,7 +95,7 @@ function App({ exit }: { exit: () => void }) {
     ],
     axes: [
       {
-        stroke: '#555',
+        stroke: '#999',
         grid: { stroke: '#222' },
         values: (_u: any, vals: number[]) => vals.map(v => {
           const m = Math.floor(Math.abs(v) / 60);
@@ -103,7 +103,7 @@ function App({ exit }: { exit: () => void }) {
           return `${v < 0 ? '-' : ''}${m}:${String(s).padStart(2, '0')}`;
         }),
       },
-      { stroke: '#555', grid: { stroke: '#222' }, scale: 'y', side: 1 },
+      { stroke: '#999', grid: { stroke: '#222' }, scale: 'y', side: 1 },
     ],
   };
 

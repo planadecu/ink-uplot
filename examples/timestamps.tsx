@@ -20,8 +20,8 @@ const opts = {
     { stroke: '#f7931a', label: 'BTC/USD', width: 2 },
   ],
   axes: [
-    { stroke: '#555', grid: { stroke: '#222' } },
-    { stroke: '#555', grid: { stroke: '#222' } },
+    { stroke: '#999', grid: { stroke: '#222' } },
+    { stroke: '#999', grid: { stroke: '#222' } },
   ],
 };
 
