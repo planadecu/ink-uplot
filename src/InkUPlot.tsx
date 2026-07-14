@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, type DOMElement } from 'ink';
 import { renderToImageData, renderToPNG } from './renderer.js';
 import { pixelsToTerminal } from './chafa.js';
 import { computeScales, buildYLabels, buildXLabelLine } from './axes.js';
@@ -8,6 +8,31 @@ import type { InkUPlotProps } from './types.js';
 
 // Serialize render calls — renderToImageData uses global DOM state and is not reentrant
 let renderLock = Promise.resolve();
+
+/**
+ * Where the reserved <Box> actually sits on screen, in cells. Out-of-band graphics
+ * (kitty/iterm2/sixels) are written straight to stdout and don't flow with Ink's
+ * layout, so we must position them ourselves. Ink lays every node out relative to
+ * the frame's top-left (yoga origin), so walking up the tree and summing computed
+ * offsets gives the box's column and row within the frame; the root's height is the
+ * frame height, used to anchor upward from the cursor Ink leaves at the frame bottom.
+ */
+function boxScreenGeom(
+  node: DOMElement | null,
+): { col: number; row: number; frameHeight: number } | null {
+  if (!node?.yogaNode) return null;
+  let col = 0;
+  let row = 0;
+  let frameHeight = 0;
+  let n: DOMElement | undefined = node;
+  while (n?.yogaNode) {
+    col += n.yogaNode.getComputedLeft();
+    row += n.yogaNode.getComputedTop();
+    frameHeight = n.yogaNode.getComputedHeight(); // ends on the root node's height
+    n = n.parentNode;
+  }
+  return { col, row, frameHeight };
+}
 
 // Cache auto-detected format (env vars don't change at runtime)
 const detectedFormat = detectFormat();
@@ -97,6 +122,8 @@ export function InkUPlot({
   const [output, setOutput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const kittyIdRef = useRef(1);
+  // Reserved box for out-of-band graphics — we read its on-screen position to place the image.
+  const boxRef = useRef<DOMElement>(null);
 
   // Clear stale output when dimensions change (not needed for kitty — bypasses Ink)
   useEffect(() => {
@@ -134,6 +161,11 @@ export function InkUPlot({
         // Re-check: a resize may have started while this frame was rendering.
         if (resizingRef.current && isRawFormat(format)) return;
 
+        // Locate the reserved box on screen so the image lands inside it — not at the
+        // terminal's top-left, which overflows any layout where the chart isn't the only pane.
+        const geom = boxScreenGeom(boxRef.current);
+        const col = (geom?.col ?? 0) + 1; // 1-based terminal column of the box's left edge
+
         if (isKitty(format)) {
           // Kitty images live in a graphics plane, so text repaints don't erase them.
           // Double-buffer with alternating image IDs (place new, delete old) to avoid flicker.
@@ -141,11 +173,13 @@ export function InkUPlot({
           const oldId = newId === 1 ? 2 : 1;
           kittyIdRef.current = oldId;
           const tagged = kittyTagImage(ansi, newId);
-          process.stdout.write(`\x1b[1;1H${tagged}${kittyDelete(oldId)}`);
+          const row = (geom?.row ?? 0) + 1; // 1-based row within the (top-anchored) frame
+          process.stdout.write(`\x1b[${row};${col}H${tagged}${kittyDelete(oldId)}`);
         } else if (isRawFormat(format)) {
-          // Inline images (iterm2/sixels) occupy character cells. Ink placed the cursor
-          // after the reserved Box, so move up to the top of it before writing the image.
-          process.stdout.write(`\x1b[${chartRows}A\x1b[1G${ansi}`);
+          // Inline images (iterm2/sixels) occupy character cells. Ink leaves the cursor at
+          // the frame bottom, so move up to the box's top row, then across to its column.
+          const up = geom ? Math.max(0, geom.frameHeight - geom.row) : chartRows;
+          process.stdout.write(`\x1b[${up}A\x1b[${col}G${ansi}`);
         } else {
           setOutput(ansi);
         }
@@ -169,7 +203,7 @@ export function InkUPlot({
   // Raw formats write the image directly to stdout, so we reserve space with an empty
   // box (no glyphs) and let the out-of-band image show through.
   if (isRawFormat(format)) {
-    return <Box width={termCols} height={chartRows} />;
+    return <Box ref={boxRef} width={termCols} height={chartRows} />;
   }
 
   if (!output) {
