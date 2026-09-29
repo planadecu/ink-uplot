@@ -101,8 +101,9 @@ describe('format predicates', () => {
 });
 
 describe('kitty escape helpers', () => {
-  it('kittyDelete targets a specific image id, quietly', () => {
-    expect(kittyDelete(3)).toBe('\x1b_Ga=d,d=i,i=3,q=2\x1b\\');
+  it('kittyDelete deletes a specific image id and frees its data, quietly', () => {
+    // d=I (uppercase) also frees the stored image data; d=i only removes placements.
+    expect(kittyDelete(3)).toBe('\x1b_Ga=d,d=I,i=3,q=2\x1b\\');
   });
 
   it('kittyTagImage injects the id into the transmit escape', () => {
@@ -110,7 +111,8 @@ describe('kitty escape helpers', () => {
     const tagged = kittyTagImage(ansi, 7);
     // q=2: suppress the terminal's OK/error reply, which would otherwise arrive on the
     // host app's stdin and be parsed as keypresses.
-    expect(tagged).toContain('\x1b_Ga=T,i=7,q=2,');
+    // C=1: don't move the cursor (Ink positions its next frame relative to the cursor).
+    expect(tagged).toContain('\x1b_Ga=T,i=7,q=2,C=1,');
     expect(tagged).toContain('BASE64DATA');
   });
 
@@ -126,5 +128,10 @@ describe('iterm2Escape', () => {
     expect(seq.startsWith('\x1b]1337;File=inline=1;width=40;height=12')).toBe(true);
     expect(seq.endsWith('\x07')).toBe(true);
     expect(seq).toContain(png.toString('base64'));
+  });
+
+  it('asks the terminal not to move the cursor', () => {
+    const seq = iterm2Escape(Buffer.from([1]), 4, 2);
+    expect(seq).toContain(';doNotMoveCursor=1');
   });
 });

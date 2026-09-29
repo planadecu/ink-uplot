@@ -32,8 +32,10 @@ async function until(cond: () => boolean, timeout = 10000): Promise<void> {
 }
 
 const isStamp = (w: Write) => w.text.includes('\x1b]1337;File=');
-// A blanking write: cursor positioning, optional SGR, then a run of spaces; no image payload.
-const isBlank = (w: Write) => /\x1b\[\d+;\d+H(\x1b\[[\d;]*m)? {4,}/.test(w.text) && !isStamp(w);
+// A blanking write: cursor positioning (column move), optional SGR, then a run of spaces;
+// no image payload.
+const BLANK_ROW = /\x1b\[\d+G(\x1b\[[\d;]*m)? {4,}/g;
+const isBlank = (w: Write) => new RegExp(BLANK_ROW.source).test(w.text) && !isStamp(w);
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -70,7 +72,7 @@ describe('inline image cleanup (iterm2)', () => {
     const blanks = writes.filter(isBlank);
     expect(blanks.length).toBeGreaterThan(0);
     // The blank covers the old 8-row area, not just the new 5 rows.
-    const rowsBlanked = (blanks[0]!.text.match(/\x1b\[\d+;\d+H/g) ?? []).length;
+    const rowsBlanked = (blanks[0]!.text.match(BLANK_ROW) ?? []).length;
     expect(rowsBlanked).toBe(8);
     // And it comes before the new, smaller image is stamped.
     const blankIdx = writes.indexOf(blanks[0]!);
