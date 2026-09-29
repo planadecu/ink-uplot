@@ -144,3 +144,57 @@ describe('inline image cleanup stays inside the frame (iterm2)', () => {
     instance.unmount();
   });
 });
+
+describe('inline image cleanup: when a resize still needs the blank (iterm2)', () => {
+  // The blank runs before Ink writes its next frame, so the stamp's cursor-relative
+  // coordinates stay valid unless Ink cleared (width shrink) or a fullscreen frame's anchor
+  // moved (row count changed). Otherwise, skipping the blank leaves old image cells behind.
+  const setSize = (instance: ReturnType<typeof render>, size: { columns?: number; rows?: number; isTTY?: boolean }) => {
+    for (const [k, v] of Object.entries(size)) {
+      Object.defineProperty(instance.stdout, k, { get: () => v, configurable: true });
+    }
+  };
+
+  it('still blanks after the terminal grows wider', async () => {
+    let instance!: ReturnType<typeof render>;
+    const writes = spyStdout(() => instance?.frames.length ?? 0);
+    instance = render(<InkUPlot opts={opts} data={data} width={40} height={8} format="iterm2" />);
+    await until(() => writes.some(isStamp));
+    const before = writes.length;
+    setSize(instance, { columns: 140 });
+    instance.rerender(<InkUPlot opts={opts} data={data} width={30} height={6} format="iterm2" />);
+    await until(() => writes.slice(before).some(isStamp));
+    expect(writes.slice(before).filter(isBlank).length).toBeGreaterThan(0);
+    instance.unmount();
+  });
+
+  it('still blanks after a height change when the frame is not fullscreen', async () => {
+    let instance!: ReturnType<typeof render>;
+    const writes = spyStdout(() => instance?.frames.length ?? 0);
+    instance = render(<InkUPlot opts={opts} data={data} width={40} height={8} format="iterm2" />);
+    await until(() => writes.some(isStamp));
+    const before = writes.length;
+    setSize(instance, { rows: 50 });
+    instance.rerender(<InkUPlot opts={opts} data={data} width={40} height={6} format="iterm2" />);
+    await until(() => writes.slice(before).some(isStamp));
+    expect(writes.slice(before).filter(isBlank).length).toBeGreaterThan(0);
+    instance.unmount();
+  });
+
+  it('skips the blank when a fullscreen frame\'s row count changed (its cursor anchor moved)', async () => {
+    let instance!: ReturnType<typeof render>;
+    const writes = spyStdout(() => instance?.frames.length ?? 0);
+    instance = render(<InkUPlot opts={opts} data={data} width={40} height={8} format="iterm2" />);
+    // The 8-row frame fills an 8-row TTY: fullscreen.
+    setSize(instance, { isTTY: true, rows: 8 });
+    instance.rerender(<InkUPlot opts={opts} data={data} width={40} height={8} format="iterm2" key="fs" />);
+    await until(() => writes.some(isStamp));
+    const before = writes.length;
+    setSize(instance, { rows: 6 });
+    instance.rerender(<InkUPlot opts={opts} data={data} width={40} height={6} format="iterm2" key="fs" />);
+    await until(() => writes.slice(before).some(isStamp));
+    expect(writes.slice(before).filter(isBlank)).toHaveLength(0);
+    instance.unmount();
+  });
+});
+

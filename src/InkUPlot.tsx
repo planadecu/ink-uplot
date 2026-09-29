@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { Box, Text, useStdout, type DOMElement } from 'ink';
+import { Box, Text, useApp, useStdout, type DOMElement } from 'ink';
 import { renderToImageData, renderToPNG } from './renderer.js';
 import { pixelsToTerminal } from './chafa.js';
 import { computeScales, buildYLabels, buildXLabelLine } from './axes.js';
@@ -155,6 +155,8 @@ export function InkUPlot({
   const [output, setOutput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { stdout: inkStdout } = useStdout();
+  // Ink >= 7 resolves this once the frame being rendered has been written to the terminal.
+  const app = useApp() as { waitUntilRenderFlush?: () => Promise<void> };
   const [kittyIds] = useState(allocateKittyIds);
   const kittyIdRef = useRef(0); // index into kittyIds of the id the next image uses
   // Reserved box for out-of-band graphics — we read its on-screen position to place the image.
@@ -192,15 +194,18 @@ export function InkUPlot({
   // and would wipe the replacement view; Ink's incremental rendering never repaints the
   // unchanged lines.) Cells Ink leaves unchanged were the chart's blank placeholder, so
   // default-attribute spaces are exactly right there.
-  // After a terminal resize the stamp's coordinates are stale: the terminal has reflowed and
-  // the host has repainted (Ink clears on width shrink; changed lines are rewritten), so
-  // blanking there would wipe unrelated content and wrap past the new right edge. Skip it.
+  // The blank runs before Ink writes its next frame, so the stamp's cursor-relative
+  // coordinates stay valid across most resizes — except when Ink cleared the screen (width
+  // shrink: it also reflowed) or the anchor moved (a fullscreen frame's row count changed).
+  // Blanking then would wipe unrelated content, so skip it; Ink repaints those lines anyway.
   useLayoutEffect(() => {
     return () => {
       const s = inlineStampRef.current;
       if (!s || isKitty(format)) return;
       inlineStampRef.current = null;
-      if (s.termCols !== inkStdout.columns || s.termRows !== inkStdout.rows) return;
+      const widthShrank = (inkStdout.columns ?? 0) < (s.termCols ?? 0);
+      const fullscreenAnchorMoved = s.minUp === 0 && s.termRows !== inkStdout.rows;
+      if (widthShrank || fullscreenAnchorMoved) return;
       // Never write past the right edge: a wrapped blank wipes the start of the next row.
       const cols = inkStdout.columns ? Math.min(s.cols, inkStdout.columns - s.col + 1) : s.cols;
       if (cols <= 0) return;
@@ -208,7 +213,12 @@ export function InkUPlot({
       let out = '';
       // Only rows inside the frame: "moving up" a negative amount is a no-op, so rows below
       // the cursor would all land on the cursor's own line (e.g. the host's status bar).
-      for (let r = 0; r < s.rows && s.up - r >= s.minUp; r++) out += cursorTo(s.up - r, s.col) + blank + '\x1b8\x1b7';
+      // …and none above the screen's top line (a frame taller than the screen): cursor-up
+      // stops there, so they would all rewrite that line.
+      const maxUp = (inkStdout.rows ?? Infinity) - 1;
+      for (let r = 0; r < s.rows && s.up - r >= s.minUp; r++) {
+        if (s.up - r <= maxUp) out += cursorTo(s.up - r, s.col) + blank + '\x1b8\x1b7';
+      }
       process.stdout.write(withSavedCursor(out));
     };
   }, [chartCols, chartRows, format]);
@@ -265,6 +275,14 @@ export function InkUPlot({
           });
         }
         if (cancelled) return;
+        // Out-of-band graphics are placed relative to the cursor Ink leaves after the frame
+        // this layout belongs to. Ink throttles frame writes and the image is often ready
+        // first, so wait until that frame is flushed (Ink >= 7); on older Ink, wait out one
+        // throttle interval (maxFps 30).
+        if (isRawFormat(format)) {
+          await (app.waitUntilRenderFlush?.() ?? new Promise<void>((r) => setTimeout(r, 50)));
+          if (cancelled) return;
+        }
         // Re-check: a resize may have started while this frame was rendering.
         if (resizingRef.current && isRawFormat(format)) return;
 
