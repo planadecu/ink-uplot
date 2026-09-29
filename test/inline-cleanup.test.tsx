@@ -81,3 +81,138 @@ describe('inline image cleanup (iterm2)', () => {
     instance.unmount();
   });
 });
+
+describe('inline image cleanup after a terminal resize (iterm2)', () => {
+  it('does not blank at stale coordinates once the terminal size has changed', async () => {
+    let instance!: ReturnType<typeof render>;
+    const writes = spyStdout(() => instance?.frames.length ?? 0);
+    instance = render(<InkUPlot opts={opts} data={data} width={40} height={8} format="iterm2" />);
+    await until(() => writes.some(isStamp));
+    const before = writes.length;
+
+    // The terminal shrinks: it reflows, and Ink repaints. The old image position no longer
+    // means anything, so blanking it would wipe whatever now sits there (and wrap past the
+    // new right edge).
+    Object.defineProperty(instance.stdout, 'columns', { get: () => 60, configurable: true });
+    instance.rerender(<InkUPlot opts={opts} data={data} width={30} height={6} format="iterm2" />);
+    await until(() => writes.slice(before).some(isStamp));
+
+    expect(writes.slice(before).filter(isBlank)).toHaveLength(0);
+    instance.unmount();
+  });
+
+  it('never blanks past the right edge of the terminal', async () => {
+    let instance!: ReturnType<typeof render>;
+    const writes = spyStdout(() => instance?.frames.length ?? 0);
+    // Chart starts at column 71 of a 100-column terminal and claims 50 columns.
+    instance = render(
+      <Box paddingLeft={70}>
+        <InkUPlot opts={opts} data={data} width={50} height={4} format="iterm2" />
+      </Box>,
+    );
+    await until(() => writes.some(isStamp));
+
+    instance.rerender(<Box><Text>gone</Text></Box>);
+    await until(() => writes.some(isBlank));
+    const blank = writes.find(isBlank)!;
+    const widest = Math.max(...(blank.text.match(/ +/g) ?? ['']).map((s) => s.length));
+    expect(widest).toBeLessThanOrEqual(100 - 71 + 1);
+    instance.unmount();
+  });
+});
+
+describe('inline image cleanup stays inside the frame (iterm2)', () => {
+  it('never blanks rows below the cursor Ink leaves after the frame', async () => {
+    let instance!: ReturnType<typeof render>;
+    const writes = spyStdout(() => instance?.frames.length ?? 0);
+    // A 10-row chart clipped into a 4-row frame: the stamp's rows run past the frame. Rows
+    // below the cursor don't exist on screen; "moving up" a negative amount is a no-op, so
+    // blanking them would repeatedly overwrite the cursor's own line (e.g. a status bar).
+    instance = render(
+      <Box height={4} overflow="hidden">
+        <InkUPlot opts={opts} data={data} width={20} height={10} format="iterm2" />
+      </Box>,
+    );
+    await until(() => writes.some(isStamp));
+    instance.rerender(<Box height={4}><Text>gone</Text></Box>);
+    await until(() => writes.some(isBlank));
+    const blank = writes.find(isBlank)!;
+    const moves = [...blank.text.matchAll(/\x1b7(?:\x1b\[(\d+)A)?\x1b\[\d+G/g)].map((m) => Number(m[1] ?? 0));
+    // Non-fullscreen: cursor is on the line after the 4-line frame, so at most 4 rows (up 4..1).
+    expect(moves.length).toBeLessThanOrEqual(4);
+    expect(Math.min(...moves)).toBeGreaterThanOrEqual(1);
+    instance.unmount();
+  });
+});
+
+describe('inline image cleanup: when a resize still needs the blank (iterm2)', () => {
+  // The blank runs before Ink writes its next frame, so the stamp's cursor-relative
+  // coordinates stay valid unless Ink cleared (width shrink) or a fullscreen frame's anchor
+  // moved (row count changed). Otherwise, skipping the blank leaves old image cells behind.
+  const setSize = (instance: ReturnType<typeof render>, size: { columns?: number; rows?: number; isTTY?: boolean }) => {
+    for (const [k, v] of Object.entries(size)) {
+      Object.defineProperty(instance.stdout, k, { get: () => v, configurable: true });
+    }
+  };
+
+  it('still blanks after the terminal grows wider', async () => {
+    let instance!: ReturnType<typeof render>;
+    const writes = spyStdout(() => instance?.frames.length ?? 0);
+    instance = render(<InkUPlot opts={opts} data={data} width={40} height={8} format="iterm2" />);
+    await until(() => writes.some(isStamp));
+    const before = writes.length;
+    setSize(instance, { columns: 140 });
+    instance.rerender(<InkUPlot opts={opts} data={data} width={30} height={6} format="iterm2" />);
+    await until(() => writes.slice(before).some(isStamp));
+    expect(writes.slice(before).filter(isBlank).length).toBeGreaterThan(0);
+    instance.unmount();
+  });
+
+  it('still blanks after a height change when the frame is not fullscreen', async () => {
+    let instance!: ReturnType<typeof render>;
+    const writes = spyStdout(() => instance?.frames.length ?? 0);
+    instance = render(<InkUPlot opts={opts} data={data} width={40} height={8} format="iterm2" />);
+    await until(() => writes.some(isStamp));
+    const before = writes.length;
+    setSize(instance, { rows: 50 });
+    instance.rerender(<InkUPlot opts={opts} data={data} width={40} height={6} format="iterm2" />);
+    await until(() => writes.slice(before).some(isStamp));
+    expect(writes.slice(before).filter(isBlank).length).toBeGreaterThan(0);
+    instance.unmount();
+  });
+
+  it('skips the blank when a fullscreen frame\'s row count changed (its cursor anchor moved)', async () => {
+    let instance!: ReturnType<typeof render>;
+    const writes = spyStdout(() => instance?.frames.length ?? 0);
+    instance = render(<InkUPlot opts={opts} data={data} width={40} height={8} format="iterm2" />);
+    // The 8-row frame fills an 8-row TTY: fullscreen.
+    setSize(instance, { isTTY: true, rows: 8 });
+    instance.rerender(<InkUPlot opts={opts} data={data} width={40} height={8} format="iterm2" key="fs" />);
+    await until(() => writes.some(isStamp));
+    const before = writes.length;
+    setSize(instance, { rows: 6 });
+    instance.rerender(<InkUPlot opts={opts} data={data} width={40} height={6} format="iterm2" key="fs" />);
+    await until(() => writes.slice(before).some(isStamp));
+    expect(writes.slice(before).filter(isBlank)).toHaveLength(0);
+    instance.unmount();
+  });
+});
+
+
+describe('inline image cleanup stays on screen (iterm2)', () => {
+  it('never blanks rows above the screen\'s top line (frame taller than the screen)', async () => {
+    let instance!: ReturnType<typeof render>;
+    const writes = spyStdout(() => instance?.frames.length ?? 0);
+    // A 10-row chart in a 5-row terminal: its top rows are above the screen. Cursor-up stops
+    // at the top line, so blanking them would rewrite that line over and over.
+    instance = render(<InkUPlot opts={opts} data={data} width={20} height={10} format="iterm2" />);
+    Object.defineProperty(instance.stdout, 'rows', { get: () => 5, configurable: true });
+    await until(() => writes.some(isStamp));
+    instance.rerender(<Box><Text>gone</Text></Box>);
+    await until(() => writes.some(isBlank));
+    const blank = writes.find(isBlank)!;
+    const ups = [...blank.text.matchAll(/\x1b7(?:\x1b\[(\d+)A)?\x1b\[\d+G/g)].map((m) => Number(m[1] ?? 0));
+    expect(Math.max(...ups)).toBeLessThanOrEqual(5 - 1);
+    instance.unmount();
+  });
+});
