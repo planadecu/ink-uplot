@@ -56,3 +56,14 @@ jobs:
       - run: npm install -g npm@latest
       - run: npm --version
       - run: npm publish
+      # Tag the bump commit and cut a matching GitHub Release. --generate-notes builds
+      # the changelog from PRs merged since the previous tag (all history on the first
+      # run). gh is preinstalled on ubuntu-latest; GITHUB_TOKEN needs contents: write.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+          gh release create "$VERSION" --generate-notes
