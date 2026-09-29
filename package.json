@@ -1,7 +1,7 @@
 {
   "name": "ink-uplot",
   "version": "0.2.13",
-  "description": "Render uPlot charts in the terminal with React Ink — truecolor Unicode block art plus native kitty, sixel, and iTerm2 graphics protocols. Line charts, time series, and live dashboards for the CLI.",
+  "description": "Render uPlot charts in the terminal with React Ink \u2014 truecolor Unicode block art plus native kitty, sixel, and iTerm2 graphics protocols. Line charts, time series, and live dashboards for the CLI.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -80,24 +80,28 @@
     "onlyBuiltDependencies": [
       "canvas",
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "tsup>esbuild": "^0.28.2"
+    }
   },
   "dependencies": {
     "canvas": "^3.2.3",
     "chafa-wasm": "^0.3.3",
-    "path2d": "^0.3.3"
+    "path2d": "^0.3.4"
   },
   "devDependencies": {
-    "@types/node": "^26.1.0",
-    "@types/react": "^19.2.17",
-    "ink": "^7.1.0",
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "ink": "^7.1.1",
     "ink-testing-library": "^4.0.0",
-    "react": "^19.2.7",
+    "react": "^19.3.0",
     "tsup": "^8.5.1",
-    "tsx": "^4.23.0",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "uplot": "^1.6.32",
-    "vitest": "^4.1.10"
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
   },
   "peerDependencies": {
     "ink": ">=4.0.0",
