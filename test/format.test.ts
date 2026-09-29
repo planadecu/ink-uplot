@@ -101,14 +101,16 @@ describe('format predicates', () => {
 });
 
 describe('kitty escape helpers', () => {
-  it('kittyDelete targets a specific image id', () => {
-    expect(kittyDelete(3)).toBe('\x1b_Ga=d,d=i,i=3\x1b\\');
+  it('kittyDelete targets a specific image id, quietly', () => {
+    expect(kittyDelete(3)).toBe('\x1b_Ga=d,d=i,i=3,q=2\x1b\\');
   });
 
   it('kittyTagImage injects the id into the transmit escape', () => {
     const ansi = '\x1b_Ga=T,f=32,s=8,v=8;BASE64DATA\x1b\\';
     const tagged = kittyTagImage(ansi, 7);
-    expect(tagged).toContain('\x1b_Ga=T,i=7,');
+    // q=2: suppress the terminal's OK/error reply, which would otherwise arrive on the
+    // host app's stdin and be parsed as keypresses.
+    expect(tagged).toContain('\x1b_Ga=T,i=7,q=2,');
     expect(tagged).toContain('BASE64DATA');
   });
 

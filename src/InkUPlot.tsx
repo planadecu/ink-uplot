@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { Box, Text, type DOMElement } from 'ink';
 import { renderToImageData, renderToPNG } from './renderer.js';
 import { pixelsToTerminal } from './chafa.js';
@@ -130,31 +130,40 @@ export function InkUPlot({
   // Drives the redraw interval (survive Ink repaints) and the unmount clear.
   const inlineStampRef = useRef<{ ansi: string; row: number; col: number; rows: number; cols: number } | null>(null);
 
-  // Real iTerm2/sixels erase inline images on Ink repaints; VS Code instead persists them
-  // (its images would stack if re-stamped). So only the former needs the redraw interval.
+  // Inline images live in the terminal's text cells: printing anything into a cell (an Ink
+  // repaint of that line) drops that part of the image. Real iTerm2/sixels get a redraw
+  // interval so the image survives the host's repaints. VS Code is excluded — re-stamping
+  // there flickers visibly; hosts should render incrementally (Ink `incrementalRendering`)
+  // so repaints don't touch the chart's lines, and re-draw after input if needed.
   const inlineErasable = isRawFormat(format) && !isKitty(format) && process.env['TERM_PROGRAM'] !== 'vscode';
 
-  // On unmount (e.g. the host app switches to a table or log view), erase the image.
   // Kitty/ghostty images live in a separate graphics plane that text repaints never clear;
   // the double-buffer only deletes the previous image on the *next* render, which never
-  // comes once the chart is gone — so delete both buffer IDs. Inline images (iterm2/vscode)
-  // have no delete command and VS Code persists them over later text, so paint the exact
-  // cells black; the host's next repaint then draws the replacement view over the black.
-  useEffect(() => {
+  // comes once the chart is gone — so on unmount delete both buffer IDs.
+  useLayoutEffect(() => {
     return () => {
-      if (isKitty(format)) {
-        process.stdout.write(kittyDelete(1) + kittyDelete(2));
-      } else if (isRawFormat(format)) {
-        const s = inlineStampRef.current;
-        if (s) {
-          const blank = `\x1b[40m${' '.repeat(s.cols)}\x1b[0m`;
-          let out = '';
-          for (let r = 0; r < s.rows; r++) out += `\x1b[${s.row + r};${s.col}H${blank}`;
-          process.stdout.write(out);
-        }
-      }
+      if (isKitty(format)) process.stdout.write(kittyDelete(1) + kittyDelete(2));
     };
   }, [format]);
+
+  // Inline images (iterm2/sixels) have no delete command: blank their cells with spaces in
+  // default attributes when the chart unmounts or changes size. This runs as a *layout*
+  // effect cleanup — during React's commit, before Ink writes the host's next frame — so
+  // that frame lands on top of the blank. (A passive effect runs after the frame is written
+  // and would wipe the replacement view; Ink's incremental rendering never repaints the
+  // unchanged lines.) Cells Ink leaves unchanged were the chart's blank placeholder, so
+  // default-attribute spaces are exactly right there.
+  useLayoutEffect(() => {
+    return () => {
+      const s = inlineStampRef.current;
+      if (!s || isKitty(format)) return;
+      inlineStampRef.current = null;
+      const blank = `\x1b[0m${' '.repeat(s.cols)}`;
+      let out = '';
+      for (let r = 0; r < s.rows; r++) out += `\x1b[${s.row + r};${s.col}H${blank}`;
+      process.stdout.write(out);
+    };
+  }, [chartCols, chartRows, format]);
 
   // Inline images (real iTerm2/sixels) sit in the text grid, so the host app's normal Ink
   // repaints (e.g. a live price ticker) erase them — and this component doesn't re-render

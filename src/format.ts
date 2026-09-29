@@ -3,12 +3,16 @@ import type { RenderFormat } from './renderer.js';
 export const isKitty = (f: string) => f === 'kitty';
 export const isRawFormat = (f: string) => f === 'kitty' || f === 'sixels' || f === 'iterm2';
 
-/** Delete a specific kitty image by ID. */
-export const kittyDelete = (id: number) => `\x1b_Ga=d,d=i,i=${id}\x1b\\`;
+// Every kitty graphics command carries q=2 (quiet): otherwise the terminal answers each
+// one with an OK/error reply (`ESC _G...;OK ESC \\`) on the host app's stdin, which Ink
+// parses as keypresses — e.g. stray `\\` characters typed into a search box.
 
-/** Inject `i=<id>` into the first kitty escape sequence so we can delete it later. */
+/** Delete a specific kitty image by ID. */
+export const kittyDelete = (id: number) => `\x1b_Ga=d,d=i,i=${id},q=2\x1b\\`;
+
+/** Inject `i=<id>` (so we can delete it later) and `q=2` into the first kitty escape sequence. */
 export function kittyTagImage(ansi: string, id: number): string {
-  return ansi.replace('\x1b_Ga=T,', `\x1b_Ga=T,i=${id},`);
+  return ansi.replace('\x1b_Ga=T,', `\x1b_Ga=T,i=${id},q=2,`);
 }
 
 /** Auto-detect the best graphics format for the current terminal. */
