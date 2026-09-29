@@ -168,6 +168,8 @@ Using ink-uplot in your project? Open a PR to add it here.
 
 - Node.js >= 18
 - System libraries for [node-canvas](https://github.com/Automattic/node-canvas#compiling) (Cairo, Pango)
+- Ink >= 7 for exact placement of native graphics (kitty, iTerm2/VS Code, sixel): images are written after Ink flushes the frame they belong to (`waitUntilRenderFlush`). Older Ink falls back to waiting one frame interval.
+- For iTerm2-protocol images (including VS Code), render with Ink's `incrementalRendering: true` so unrelated updates don't repaint — and erase — the chart's lines.
 
 ## License
 

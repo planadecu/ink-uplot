@@ -198,3 +198,21 @@ describe('inline image cleanup: when a resize still needs the blank (iterm2)', (
   });
 });
 
+
+describe('inline image cleanup stays on screen (iterm2)', () => {
+  it('never blanks rows above the screen\'s top line (frame taller than the screen)', async () => {
+    let instance!: ReturnType<typeof render>;
+    const writes = spyStdout(() => instance?.frames.length ?? 0);
+    // A 10-row chart in a 5-row terminal: its top rows are above the screen. Cursor-up stops
+    // at the top line, so blanking them would rewrite that line over and over.
+    instance = render(<InkUPlot opts={opts} data={data} width={20} height={10} format="iterm2" />);
+    Object.defineProperty(instance.stdout, 'rows', { get: () => 5, configurable: true });
+    await until(() => writes.some(isStamp));
+    instance.rerender(<Box><Text>gone</Text></Box>);
+    await until(() => writes.some(isBlank));
+    const blank = writes.find(isBlank)!;
+    const ups = [...blank.text.matchAll(/\x1b7(?:\x1b\[(\d+)A)?\x1b\[\d+G/g)].map((m) => Number(m[1] ?? 0));
+    expect(Math.max(...ups)).toBeLessThanOrEqual(5 - 1);
+    instance.unmount();
+  });
+});
