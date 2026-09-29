@@ -3,13 +3,30 @@ import type { RenderFormat } from './renderer.js';
 export const isKitty = (f: string) => f === 'kitty';
 export const isRawFormat = (f: string) => f === 'kitty' || f === 'sixels' || f === 'iterm2';
 
-/** Delete a specific kitty image by ID. */
-export const kittyDelete = (id: number) => `\x1b_Ga=d,d=i,i=${id}\x1b\\`;
+// Every kitty graphics command carries q=2 (quiet): otherwise the terminal answers each
+// one with an OK/error reply (`ESC _G...;OK ESC \\`) on the host app's stdin, which Ink
+// parses as keypresses — e.g. stray `\\` characters typed into a search box.
 
-/** Inject `i=<id>` into the first kitty escape sequence so we can delete it later. */
+/** Delete a kitty image by ID and free its data (`d=I`; `d=i` only removes placements). */
+export const kittyDelete = (id: number) => `\x1b_Ga=d,d=I,i=${id},q=2\x1b\\`;
+
+/**
+ * Inject into the first kitty escape: `i=<id>` (so we can delete it later), `q=2`, and
+ * `C=1` (don't move the cursor — Ink positions its next frame relative to the cursor).
+ */
 export function kittyTagImage(ansi: string, id: number): string {
-  return ansi.replace('\x1b_Ga=T,', `\x1b_Ga=T,i=${id},`);
+  return ansi.replace('\x1b_Ga=T,', `\x1b_Ga=T,i=${id},q=2,C=1,`);
 }
+
+/**
+ * Wrap an out-of-band graphics write in save/restore cursor (DECSC/DECRC). Ink writes each
+ * frame relative to where it left the cursor, so a write that moves it would shift the
+ * host's next frame.
+ */
+export const withSavedCursor = (s: string) => `\x1b7${s}\x1b8`;
+
+/** Move `up` lines up from the cursor, then to 1-based column `col`. */
+export const cursorTo = (up: number, col: number) => `${up > 0 ? `\x1b[${up}A` : ''}\x1b[${col}G`;
 
 /** Auto-detect the best graphics format for the current terminal. */
 export function detectFormat(): RenderFormat {
@@ -44,5 +61,7 @@ export function detectFormat(): RenderFormat {
 /** Wrap a PNG buffer in an iTerm2 inline image escape sequence. */
 export function iterm2Escape(png: Buffer, cols: number, rows: number): string {
   const b64 = png.toString('base64');
-  return `\x1b]1337;File=inline=1;width=${cols};height=${rows};preserveAspectRatio=0:${b64}\x07`;
+  // doNotMoveCursor=1: iTerm2 leaves the cursor in place (others ignore unknown keys; the
+  // write is also wrapped in withSavedCursor).
+  return `\x1b]1337;File=inline=1;width=${cols};height=${rows};preserveAspectRatio=0;doNotMoveCursor=1:${b64}\x07`;
 }

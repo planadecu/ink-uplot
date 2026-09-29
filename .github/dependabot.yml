@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # Match the .npmrc release-age gate: only propose versions >= 7 days old.
+    cooldown:
+      default-days: 7
+    groups:
+      # One PR per week for all non-major bumps; majors stay separate for review.
+      minor-and-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']
