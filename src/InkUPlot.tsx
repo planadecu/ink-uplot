@@ -43,12 +43,17 @@ function boxScreenGeom(
  * at an absolute terminal row — keeps the image in place when the frame doesn't start at
  * the terminal's first row (non-fullscreen hosts, output below a shell prompt).
  */
-function linesUpFromCursor(
+function cursorAnchor(
   geom: { row: number; frameHeight: number },
   stdout: { isTTY?: boolean; rows?: number },
-): number {
+): { up: number; minUp: number } {
   const fullscreen = Boolean(stdout.isTTY) && stdout.rows !== undefined && geom.frameHeight >= stdout.rows;
-  return geom.frameHeight - geom.row - (fullscreen ? 1 : 0);
+  return {
+    up: geom.frameHeight - geom.row - (fullscreen ? 1 : 0),
+    // Lowest on-screen frame line, counted up from the cursor (fullscreen: the cursor's own
+    // line; otherwise the line above it). Anything below is outside the frame.
+    minUp: fullscreen ? 0 : 1,
+  };
 }
 
 // Kitty image ids are global to the terminal window. Give each chart its own pair (for the
@@ -156,8 +161,13 @@ export function InkUPlot({
   const boxRef = useRef<DOMElement>(null);
   // Last inline image (iterm2/sixels) + where it was stamped, in 1-based cells.
   // Drives the redraw interval (survive Ink repaints) and the unmount clear.
-  // `up`/`col` are relative to the cursor Ink leaves after a frame (see linesUpFromCursor).
-  const inlineStampRef = useRef<{ ansi: string; up: number; col: number; rows: number; cols: number } | null>(null);
+  // `up`/`col` are relative to the cursor Ink leaves after a frame (see cursorAnchor).
+  // termCols/termRows: the terminal size when stamped — after a resize the stamp's
+  // coordinates are stale (the terminal reflowed and the host repainted).
+  const inlineStampRef = useRef<{
+    ansi: string; up: number; minUp: number; col: number; rows: number; cols: number;
+    termCols?: number; termRows?: number;
+  } | null>(null);
 
   // Inline images live in the terminal's text cells: printing anything into a cell (an Ink
   // repaint of that line) drops that part of the image. Real iTerm2/sixels get a redraw
@@ -182,14 +192,23 @@ export function InkUPlot({
   // and would wipe the replacement view; Ink's incremental rendering never repaints the
   // unchanged lines.) Cells Ink leaves unchanged were the chart's blank placeholder, so
   // default-attribute spaces are exactly right there.
+  // After a terminal resize the stamp's coordinates are stale: the terminal has reflowed and
+  // the host has repainted (Ink clears on width shrink; changed lines are rewritten), so
+  // blanking there would wipe unrelated content and wrap past the new right edge. Skip it.
   useLayoutEffect(() => {
     return () => {
       const s = inlineStampRef.current;
       if (!s || isKitty(format)) return;
       inlineStampRef.current = null;
-      const blank = `\x1b[0m${' '.repeat(s.cols)}`;
+      if (s.termCols !== inkStdout.columns || s.termRows !== inkStdout.rows) return;
+      // Never write past the right edge: a wrapped blank wipes the start of the next row.
+      const cols = inkStdout.columns ? Math.min(s.cols, inkStdout.columns - s.col + 1) : s.cols;
+      if (cols <= 0) return;
+      const blank = `\x1b[0m${' '.repeat(cols)}`;
       let out = '';
-      for (let r = 0; r < s.rows; r++) out += cursorTo(s.up - r, s.col) + blank + '\x1b8\x1b7';
+      // Only rows inside the frame: "moving up" a negative amount is a no-op, so rows below
+      // the cursor would all land on the cursor's own line (e.g. the host's status bar).
+      for (let r = 0; r < s.rows && s.up - r >= s.minUp; r++) out += cursorTo(s.up - r, s.col) + blank + '\x1b8\x1b7';
       process.stdout.write(withSavedCursor(out));
     };
   }, [chartCols, chartRows, format]);
@@ -202,7 +221,9 @@ export function InkUPlot({
     if (!inlineErasable) return;
     const id = setInterval(() => {
       const s = inlineStampRef.current;
-      if (s) process.stdout.write(withSavedCursor(cursorTo(s.up, s.col) + s.ansi));
+      // Not mid-resize, and not at coordinates from a different terminal size.
+      if (!s || resizingRef.current || s.termCols !== inkStdout.columns || s.termRows !== inkStdout.rows) return;
+      process.stdout.write(withSavedCursor(cursorTo(s.up, s.col) + s.ansi));
     }, 120);
     return () => clearInterval(id);
   }, [inlineErasable]);
@@ -214,6 +235,10 @@ export function InkUPlot({
 
   useEffect(() => {
     if (canvasWidth < 8 || canvasHeight < 16) return;
+    // The committed size lags the requested one (a resize just settled, or width/height
+    // props changed): drawing now would place an image of the old size, recorded against
+    // the new terminal size. The committed update re-runs this effect at the right size.
+    if (committed.cols !== liveCols || committed.rows !== liveRows) return;
     let cancelled = false;
 
     // Serialize through renderLock — renderToImageData is not reentrant
@@ -247,7 +272,7 @@ export function InkUPlot({
         // terminal's top-left, which overflows any layout where the chart isn't the only pane.
         const geom = boxScreenGeom(boxRef.current) ?? { col: 0, row: 0, frameHeight: 0 };
         const col = geom.col + 1; // 1-based terminal column of the box's left edge
-        const up = linesUpFromCursor(geom, inkStdout);
+        const { up, minUp } = cursorAnchor(geom, inkStdout);
 
         if (isKitty(format)) {
           // Kitty images live in a graphics plane, so text repaints don't erase them.
@@ -261,7 +286,10 @@ export function InkUPlot({
           // Inline images (iterm2/sixels) occupy character cells. Place at the box's top-left
           // and cache the stamp for the redraw interval and the blank-on-change cleanup.
           process.stdout.write(withSavedCursor(cursorTo(up, col) + ansi));
-          inlineStampRef.current = { ansi, up, col, rows: chartRows, cols: chartCols };
+          inlineStampRef.current = {
+            ansi, up, minUp, col, rows: chartRows, cols: chartCols,
+            termCols: inkStdout.columns, termRows: inkStdout.rows,
+          };
         } else {
           setOutput(ansi);
         }
@@ -276,7 +304,7 @@ export function InkUPlot({
     });
 
     return () => { cancelled = true; };
-  }, [opts, data, canvasWidth, canvasHeight, chartCols, chartRows, format, color, showAxes, resizeTick]);
+  }, [opts, data, canvasWidth, canvasHeight, chartCols, chartRows, format, color, showAxes, resizeTick, committed.cols, committed.rows, liveCols, liveRows]);
 
   if (error) {
     return <Text color="red">Error rendering chart: {error}</Text>;
