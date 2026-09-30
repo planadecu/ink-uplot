@@ -3,6 +3,10 @@ on:
   push:
     branches:
       - main
+    # Changes that don't reach the npm package don't publish a new version.
+    paths-ignore:
+      - '.github/**'
+      - 'CLAUDE.md'
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -11,16 +15,16 @@ jobs:
       packages: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           standalone: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           # registry-url is required so npm knows the registry for the OIDC exchange.
@@ -29,7 +33,9 @@ jobs:
           # is set on the publish step. (pnpm publish does NOT do this — it uses the
           # placeholder and 404s — which is why we publish with npm below.)
           registry-url: 'https://registry.npmjs.org'
-          cache: 'pnpm'
+          # No dependency cache in the release job: a poisoned cache could reach the
+          # published package (setup-node's cache-poisoning guidance).
+          package-manager-cache: false
       - name: Configure Git
         run: |
           git config --global user.name 'GitHub Actions'
